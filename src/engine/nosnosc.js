@@ -9,82 +9,90 @@ const BS = root.BS, U = BS.U, P = BS.P;
 const R = BS.R = {};
 const s3 = Math.sqrt(3);
 
-/* ---------------------------------------------------------- klasyfikacja */
-// Mpos: true – ściskany pas górny (moment dodatni), Nc – siła ściskająca [N] (+), fy
-R.classify = function (sec, fy, Mpos, Nc, hasM) {
-  const eps = Math.sqrt(235 / fy);
-  const out = { eps, parts: [] };
-  const bendingOnly = hasM !== false;
-  // pas ściskany (wspornikowy) – tabl. 5.2 ark. 2
-  const flanges = [];
-  if (Nc > 0 || !bendingOnly) { flanges.push({ n: 'pas górny', c: sec.c_fg, t: sec.tg }, { n: 'pas dolny', c: sec.c_fd, t: sec.td }); }
-  else flanges.push(Mpos ? { n: 'pas górny (ściskany)', c: sec.c_fg, t: sec.tg } : { n: 'pas dolny (ściskany)', c: sec.c_fd, t: sec.td });
-  flanges.forEach(f => {
-    const ct = f.c / f.t, lim = [9 * eps, 10 * eps, 14 * eps];
-    const cls = ct <= lim[0] ? 1 : ct <= lim[1] ? 2 : ct <= lim[2] ? 3 : 4;
-    out.parts.push({ n: f.n, typ: 'wspornikowa', c: f.c, t: f.t, ct, lim, cls, ref: 'tabl. 5.2 (ark. 2)' });
-  });
-  // środnik – tabl. 5.2 ark. 1
-  const c = sec.c_w, t = sec.tw, ct = c / t;
-  const rw = sec.typ === 'walc' ? sec.r : Math.SQRT2 * (sec.aw || 0);
-  const zTopW = sec.h - sec.tg - rw, zBotW = sec.td + rw;
-  // α – zasięg strefy ściskanej (plastycznie); oś obojętna plastyczna przy sile Nc
+/* ---------------------------------------------------------- klasyfikacja (tabl. 5.2) */
+// położenie osi obojętnej plastycznej przy sile Nc (ściskanie +) i ściskanej stronie Mpos
+function plasticNA(sec, fy, Nc, Mpos) {
   const Ac = U.clamp((sec.A + Nc / fy) / 2, 0, sec.A);
-  let alpha;
-  if (!bendingOnly) alpha = Nc >= 0 ? 1 : 0;
-  else {
-    // pole ściskane od strony pasa ściskanego = Ac → położenie osi zp
-    let lo = 0, hi = sec.h;
-    for (let k = 0; k < 60; k++) {
-      const m = (lo + hi) / 2;
-      const a = P.integrals(P.clip(sec.pts, m, Mpos), 0).A; // pole po stronie ściskanej
-      if (Mpos) { if (a > Ac) lo = m; else hi = m; } else { if (a > Ac) hi = m; else lo = m; }
-    }
-    const zp = (lo + hi) / 2;
-    alpha = U.clamp(Mpos ? (zTopW - zp) / c : (zp - zBotW) / c, 0, 1);
+  let lo = 0, hi = sec.h;
+  for (let k = 0; k < 60; k++) {
+    const m = (lo + hi) / 2;
+    const a = P.integrals(P.clip(sec.rings, m, Mpos), 0).A; // pole po stronie ściskanej
+    if (Mpos) { if (a > Ac) lo = m; else hi = m; } else { if (a > Ac) hi = m; else lo = m; }
   }
-  // ψ – rozkład sprężysty (ściskanie dodatnie) – na końcach części c
-  let psi;
-  if (!bendingOnly) psi = 1;
+  return (lo + hi) / 2;
+}
+R.plasticNA = plasticNA;
+// klasa ścianki wewnętrznej przy rozkładzie (α – plastycznie, ψ – sprężyście)
+function internalClass(ct, eps, alpha, ps) {
+  let l1, l2, l3;
+  if (alpha >= 0.999 && ps >= 0.999) { l1 = 33 * eps; l2 = 38 * eps; l3 = 42 * eps; }
   else {
-    // naprężenie od jednostkowego M (proporcja ustalana przez stosunek do N jest nieznana – przyjmujemy M = Mel)
-    psi = null;
+    l1 = alpha > 0.5 ? 396 * eps / (13 * alpha - 1) : 36 * eps / Math.max(alpha, 1e-6);
+    l2 = alpha > 0.5 ? 456 * eps / (13 * alpha - 1) : 41.5 * eps / Math.max(alpha, 1e-6);
+    l3 = ps > -1 ? 42 * eps / (0.67 + 0.33 * ps) : 62 * eps * (1 - ps) * Math.sqrt(-ps);
   }
-  out.alpha = alpha;
-  out.webFn = function (sigTop, sigBot) { // naprężenia (ściskanie +) na końcach części c środnika
-    const smax = Math.max(sigTop, sigBot), smin = Math.min(sigTop, sigBot);
-    if (smax <= 0) return { cls: 1, psi: -Infinity, lim: [Infinity, Infinity, Infinity], tension: true };
-    const ps = smin / smax;
-    let l1, l2, l3;
-    if (alpha >= 0.999 && ps >= 0.999) { l1 = 33 * eps; l2 = 38 * eps; l3 = 42 * eps; }
-    else {
-      l1 = alpha > 0.5 ? 396 * eps / (13 * alpha - 1) : 36 * eps / Math.max(alpha, 1e-6);
-      l2 = alpha > 0.5 ? 456 * eps / (13 * alpha - 1) : 41.5 * eps / Math.max(alpha, 1e-6);
-      l3 = ps > -1 ? 42 * eps / (0.67 + 0.33 * ps) : 62 * eps * (1 - ps) * Math.sqrt(-ps);
-    }
-    const cls = ct <= l1 ? 1 : ct <= l2 ? 2 : ct <= l3 ? 3 : 4;
-    return { cls, psi: ps, lim: [l1, l2, l3] };
-  };
-  out.web = { n: 'środnik', typ: 'wewnętrzna', c, t, ct, alpha, ref: 'tabl. 5.2 (ark. 1)' };
-  return out;
-};
-
-/* pełna klasyfikacja dla stanu (M, Nc) – naprężenia sprężyste określają ψ */
+  return { cls: ct <= l1 ? 1 : ct <= l2 ? 2 : ct <= l3 ? 3 : 4, lim: [l1, l2, l3] };
+}
+/* pełna klasyfikacja dla stanu (M, Nc): M > 0 – ściskana góra przekroju; Nc > 0 – ściskanie */
 R.classAt = function (sec, fy, M, Nc) {
-  const Mpos = M >= 0;
-  const hasM = Math.abs(M) > 1;
-  const k = R.classify(sec, fy, Mpos, Nc, hasM);
-  const rw = sec.typ === 'walc' ? sec.r : Math.SQRT2 * (sec.aw || 0);
-  const zT = sec.h - sec.tg - rw - sec.zc, zB = sec.td + rw - sec.zc;
-  // σ (ściskanie +) = Nc/A + M·z/Iy  (M > 0 ściska górę)
-  const Mref = hasM ? M : 0;
-  const sT = Nc / sec.A + Mref * zT / sec.Iy, sB = Nc / sec.A + Mref * zB / sec.Iy;
-  const w = k.webFn(sT, sB);
-  Object.assign(k.web, w);
-  const all = k.parts.concat([k.web]);
-  k.cls = Math.max(...all.map(p => p.cls));
-  k.all = all;
-  return k;
+  const eps = Math.sqrt(235 / fy);
+  const Mpos = M >= 0, hasM = Math.abs(M) > 1;
+  const sig = (z) => Nc / sec.A + (hasM ? M : 0) * (z - sec.zc) / sec.Iy; // ściskanie +
+  const out = { eps, all: [] };
+  if (sec.kind === 'L') {
+    // kątowniki: przy ściskaniu – tabl. 5.2 (ark. 3); przy zginaniu – ramiona jako ścianki wspornikowe (ark. 2) z rozkładem naprężeń
+    const { h, b, t } = sec;
+    if (!hasM) {
+      const r1 = h / t, r2 = (b + h) / (2 * t), c3 = r1 <= 15 * eps && r2 <= 11.5 * eps;
+      out.all.push({ n: 'kątownik ściskany: h/t', typ: 'kątownik', c: h, t, ct: r1, lim: [Infinity, Infinity, 15 * eps], cls: c3 ? 3 : 4, ref: 'tabl. 5.2 (ark. 3)' });
+      out.all.push({ n: 'kątownik ściskany: (b + h)/2t', typ: 'kątownik', c: (b + h) / 2, t, ct: r2, lim: [Infinity, Infinity, 11.5 * eps], cls: c3 ? 3 : 4, ref: 'tabl. 5.2 (ark. 3)' });
+    } else {
+      const zpL = plasticNA(sec, fy, Nc, Mpos);
+      const top = sec.poz === 'gora';
+      // ramię pionowe: krawędź swobodna u góry (poz = dol) lub u dołu (gora)
+      const zTip = top ? 0 : h, zRoot = top ? h : 0;
+      const sTip = sig(zTip), sRoot = sig(zRoot), ct = h / t;
+      if (Math.max(sTip, sRoot) <= 0) out.all.push({ n: 'ramię pionowe', typ: 'wspornikowa', c: h, t, ct, lim: [Infinity, Infinity, Infinity], cls: 1, tension: true, ref: 'tabl. 5.2 (ark. 2)' });
+      else {
+        const tipC = sTip >= sRoot;
+        const alpha = U.clamp(tipC ? Math.abs(zTip - zpL) / h : Math.abs(zpL - zRoot) / h, 1e-6, 1);
+        let ks, l1, l2;
+        if (tipC) { const ps = sRoot / sTip; ks = ps >= 1 ? 0.43 : 0.57 - 0.21 * ps + 0.07 * ps * ps; l1 = 9 * eps / alpha; l2 = 10 * eps / alpha; }
+        else { const ps = sTip / sRoot; ks = ps >= 1 ? 0.43 : ps > 0 ? 0.578 / (ps + 0.34) : ps > -1 ? 1.7 - 5 * ps + 17.1 * ps * ps : 23.8; l1 = 9 * eps / (alpha * Math.sqrt(alpha)); l2 = 10 * eps / (alpha * Math.sqrt(alpha)); }
+        const l3 = 21 * eps * Math.sqrt(ks);
+        out.all.push({ n: `ramię pionowe (${tipC ? 'ściskana krawędź swobodna' : 'rozciągana krawędź swobodna'})`, typ: 'wspornikowa', c: h, t, ct, alpha, lim: [l1, l2, l3], cls: ct <= l1 ? 1 : ct <= l2 ? 2 : ct <= l3 ? 3 : 4, ref: 'tabl. 5.2 (ark. 2)' });
+      }
+      const zH = top ? h - t / 2 : t / 2, sH = sig(zH), cth = b / t;
+      if (sH <= 0) out.all.push({ n: 'ramię poziome', typ: 'wspornikowa', c: b, t, ct: cth, lim: [Infinity, Infinity, Infinity], cls: 1, tension: true, ref: 'tabl. 5.2 (ark. 2)' });
+      else { const lim = [9 * eps, 10 * eps, 14 * eps]; out.all.push({ n: 'ramię poziome (ściskane)', typ: 'wspornikowa', c: b, t, ct: cth, lim, cls: cth <= lim[0] ? 1 : cth <= lim[1] ? 2 : cth <= lim[2] ? 3 : 4, ref: 'tabl. 5.2 (ark. 2)' }); }
+    }
+    out.cls = Math.max(...out.all.map(p => p.cls)); out.alpha = 0.5; out.parts = out.all.slice(1); out.web = out.all[0];
+    return out;
+  }
+  const zp = hasM ? plasticNA(sec, fy, Nc, Mpos) : null;
+  sec.parts.forEach(p => {
+    const ct = p.c / p.t;
+    if (p.side === 'web') {
+      const c = p.z1 - p.z0;
+      let alpha;
+      if (!hasM) alpha = Nc >= 0 ? 1 : 0;
+      else alpha = U.clamp(Mpos ? (p.z1 - zp) / c : (zp - p.z0) / c, 0, 1);
+      const sT = sig(p.z1), sB = sig(p.z0), smax = Math.max(sT, sB), smin = Math.min(sT, sB);
+      if (smax <= 0) { out.all.push({ n: p.n, typ: 'wewnętrzna', c: p.c, t: p.t, ct, alpha, psi: -Infinity, lim: [Infinity, Infinity, Infinity], cls: 1, tension: true, ref: 'tabl. 5.2 (ark. 1)' }); return; }
+      const ps = smin / smax, k = internalClass(ct, eps, alpha, ps);
+      out.all.push({ n: p.n, typ: 'wewnętrzna', c: p.c, t: p.t, ct, alpha, psi: ps, lim: k.lim, cls: k.cls, ref: 'tabl. 5.2 (ark. 1)' });
+      out.alpha = alpha;
+    } else {
+      const sg = sig(p.z);
+      if (sg <= 0) { out.all.push({ n: p.n, typ: p.typ === 'wsp' ? 'wspornikowa' : 'wewnętrzna', c: p.c, t: p.t, ct, lim: [Infinity, Infinity, Infinity], cls: 1, tension: true, ref: p.typ === 'wsp' ? 'tabl. 5.2 (ark. 2)' : 'tabl. 5.2 (ark. 1)' }); return; }
+      const lim = p.typ === 'wsp' ? [9 * eps, 10 * eps, 14 * eps] : [33 * eps, 38 * eps, 42 * eps];
+      out.all.push({ n: p.n, typ: p.typ === 'wsp' ? 'wspornikowa' : 'wewnętrzna', c: p.c, t: p.t, ct, lim, cls: ct <= lim[0] ? 1 : ct <= lim[1] ? 2 : ct <= lim[2] ? 3 : 4, ref: p.typ === 'wsp' ? 'tabl. 5.2 (ark. 2)' : 'tabl. 5.2 (ark. 1)' });
+    }
+  });
+  out.cls = Math.max(...out.all.map(p => p.cls));
+  out.parts = out.all.filter(p => !/środnik|boczne/.test(p.n));
+  out.web = out.all.find(p => /środnik|boczne/.test(p.n)) || out.all[out.all.length - 1];
+  return out;
 };
 
 /* ---------------------------------------------------------- przekrój efektywny (PN-EN 1993-1-5, 4.4) */
@@ -94,33 +102,39 @@ const kSigInternal = (psi) => (psi >= 1 ? 4 : psi > 0 ? 8.2 / (1.05 + psi) : psi
 
 // mode: 'Mpos' | 'Mneg' | 'N' – zwraca prostokąty efektywne i charakterystyki
 R.effective = function (sec, fy, mode) {
+  if (sec.kind === 'L') throw new Error('Kątownik klasy 4 – przekrój efektywny kątownika nie jest obsługiwany (dobierz grubszy kątownik).');
   const eps = Math.sqrt(235 / fy);
   let rects = P.rects(sec);
   const info = [];
-  const cutFlange = (id, c, t) => {
-    const lp = (c / t) / (28.4 * eps * Math.sqrt(0.43));
-    const rho = rhoOutstand(lp), cut = (1 - rho) * c;
-    info.push({ el: id === 'fg' ? 'pas górny' : 'pas dolny', lp, rho, kS: 0.43, beff: rho * c, c });
-    if (cut > 1e-6) {
-      const r = rects.find(q => q.id === id);
-      rects = rects.filter(q => q !== r);
-      rects.push(Object.assign({}, r, { y0: r.y0 + cut, y1: r.y1 - cut, id: id + 'e' })); // części nieefektywne przy krawędziach swobodnych
-    }
+  const flange = (id) => {
+    const p = sec.parts.find(q => q.side === (id === 'fg' ? 'top' : 'bot'));
+    if (!p) return;
+    const out = p.typ === 'wsp';
+    const kS = out ? 0.43 : 4;
+    const lp = (p.c / p.t) / (28.4 * eps * Math.sqrt(kS));
+    const rho = out ? rhoOutstand(lp) : rhoInternal(lp, 1), cut = (1 - rho) * p.c;
+    info.push({ el: p.n, lp, rho, kS, beff: rho * p.c, c: p.c });
+    if (cut <= 1e-6) return;
+    const r = rects.find(q => q.id === id);
+    rects = rects.filter(q => q !== r);
+    if (!out) { const ym = (r.y0 + r.y1) / 2; rects.push(Object.assign({}, r, { y1: ym - cut / 2, id: id + 'L' }), Object.assign({}, r, { y0: ym + cut / 2, id: id + 'P' })); }   // ścianka wewnętrzna – część środkowa nieefektywna
+    else if (r.tip === 'right') rects.push(Object.assign({}, r, { y1: r.y1 - cut, id: id + 'e' }));
+    else rects.push(Object.assign({}, r, { y0: r.y0 + cut, y1: r.y1 - cut, id: id + 'e' }));     // dwuteownik – krawędzie swobodne po obu stronach
   };
-  if (mode === 'Mpos' || mode === 'N') cutFlange('fg', sec.c_fg, sec.tg);
-  if (mode === 'Mneg' || mode === 'N') cutFlange('fd', sec.c_fd, sec.td);
-  // środnik – rozkład naprężeń z przekroju z efektywnymi pasami i pełnym środnikiem
+  if (mode === 'Mpos' || mode === 'N') flange('fg');
+  if (mode === 'Mneg' || mode === 'N') flange('fd');
+  // ścianki pionowe – rozkład naprężeń z przekroju z efektywnymi pasami i pełnymi ściankami
   const g1 = P.rectProps(rects);
-  const rw = sec.typ === 'walc' ? sec.r : Math.SQRT2 * (sec.aw || 0);
-  const zTw = sec.h - sec.tg - rw, zBw = sec.td + rw, c = zTw - zBw;
-  let psi, zc = g1.zc;
+  const pw = sec.parts.find(q => q.side === 'web');
+  const zTw = pw.z1, zBw = pw.z0, c = zTw - zBw;
+  let psi; const zc = g1.zc;
   if (mode === 'N') psi = 1;
   else if (mode === 'Mpos') psi = (zBw - zc) / (zTw - zc); // σ ∝ (z − zc), ściskanie u góry
   else psi = (zTw - zc) / (zBw - zc);
   const kS = kSigInternal(psi);
-  const lp = (c / sec.tw) / (28.4 * eps * Math.sqrt(kS));
+  const lp = (c / pw.t) / (28.4 * eps * Math.sqrt(kS));
   const rho = rhoInternal(lp, psi);
-  let bc = psi < 0 ? c / (1 - psi) : c; // długość strefy ściskanej
+  const bc = psi < 0 ? c / (1 - psi) : c; // długość strefy ściskanej
   const beff = rho * bc;
   let hole = null;
   if (rho < 1) {
@@ -128,24 +142,23 @@ R.effective = function (sec, fy, mode) {
     if (psi >= 1) { be1 = 0.5 * beff; be2 = 0.5 * beff; }
     else if (psi >= 0) { be1 = 2 * beff / (5 - psi); be2 = beff - be1; }
     else { be1 = 0.4 * beff; be2 = 0.6 * beff; }
-    // strefa ściskana zaczyna się przy pasie ściskanym
     if (mode === 'Mpos') hole = [zTw - bc + be2, zTw - be1];
     else if (mode === 'Mneg') hole = [zBw + be1, zBw + bc - be2];
     else hole = [zBw + be2, zTw - be1];
-    const w = rects.find(q => q.id === 'w');
-    rects = rects.filter(q => q !== w);
-    rects.push(Object.assign({}, w, { z1: hole[0], id: 'w1' }), Object.assign({}, w, { z0: hole[1], id: 'w2' }));
+    const ws = rects.filter(q => q.id === 'w');
+    rects = rects.filter(q => q.id !== 'w');
+    ws.forEach(w => rects.push(Object.assign({}, w, { z1: hole[0], id: 'w1' }), Object.assign({}, w, { z0: hole[1], id: 'w2' })));
   }
-  info.push({ el: 'środnik', lp, rho, kS, psi, bc, beff, c, hole });
+  info.push({ el: pw.n, lp, rho, kS, psi, bc, beff, c, hole });
   const g = P.rectProps(rects);
-  return { rects, A: g.A, zc: g.zc, Iy: g.Iy, Wt: g.Wt, Wb: g.Wb, Weff: mode === 'Mpos' ? Math.min(g.Wt, g.Wb) : mode === 'Mneg' ? Math.min(g.Wt, g.Wb) : null, eN: g.zc - sec.zc, info, reduced: info.some(i => i.rho < 1) };
+  return { rects, A: g.A, zc: g.zc, Iy: g.Iy, Wt: g.Wt, Wb: g.Wb, Weff: mode === 'N' ? null : Math.min(g.Wt, g.Wb), eN: g.zc - sec.zc, info, reduced: info.some(i => i.rho < 1) };
 };
 
 /* ---------------------------------------------------------- nośności podstawowe */
 R.basic = function (sec, mat, ndp) {
   const fy = mat.fy, g0 = ndp.gM0, g1 = ndp.gM1;
   const eta = fy > 460 ? 1.0 : ndp.eta;
-  const Av = sec.typ === 'walc' ? Math.max(sec.Avz, eta * sec.hw * sec.tw) : eta * sec.hw * sec.tw;
+  const Av = sec.kind === 'I' ? (sec.typ === 'walc' ? Math.max(sec.Avz, eta * sec.hw * sec.tw) : eta * sec.hw * sec.tw) : sec.Avz;
   const o = {
     fy, eps: Math.sqrt(235 / fy), eta, Av,
     Npl: sec.A * fy / g0,
@@ -154,21 +167,22 @@ R.basic = function (sec, mat, ndp) {
     Mpl_pos: sec.Wpl_y * fy / g0, Mpl_neg: sec.Wpl_y * fy / g0,
     Mel_pos: Math.min(sec.Wel_t, sec.Wel_b) * fy / g0, Mel_neg: Math.min(sec.Wel_t, sec.Wel_b) * fy / g0,
     Mplz: sec.Wpl_z * fy / g0, Melz: sec.Wel_z * fy / g0,
-    Mf: Math.min(sec.bg * sec.tg, sec.bd * sec.td) * sec.hs * fy / g0,
+    Mf: (sec.Af || 0) * sec.hs * fy / g0,
     hwtw: sec.hw / sec.tw
   };
   // klasy przy czystym zginaniu (+/−) i czystym ściskaniu
   o.kPos = R.classAt(sec, fy, 1e9, 0); o.kNeg = R.classAt(sec, fy, -1e9, 0); o.kN = R.classAt(sec, fy, 0, 1e6);
   o.effPos = o.kPos.cls === 4 ? R.effective(sec, fy, 'Mpos') : null;
   o.effNeg = o.kNeg.cls === 4 ? R.effective(sec, fy, 'Mneg') : null;
-  o.effN = o.kN.cls === 4 ? R.effective(sec, fy, 'N') : null;
+  o.effN = null;
+  if (o.kN.cls === 4) { try { o.effN = R.effective(sec, fy, 'N'); } catch (e) { o.effNerr = e.message; } }
   const Wfor = (k, eff) => (k.cls <= 2 ? sec.Wpl_y : k.cls === 3 ? Math.min(sec.Wel_t, sec.Wel_b) : eff.Weff);
   o.Wy_pos = Wfor(o.kPos, o.effPos); o.Wy_neg = Wfor(o.kNeg, o.effNeg);
   o.Mc_pos = o.Wy_pos * fy / g0; o.Mc_neg = o.Wy_neg * fy / g0;
-  o.Aeff = o.effN ? o.effN.A : sec.A;
+  o.Aeff = o.effN ? o.effN.A : sec.A;   // kątownik kl. 4 przy ściskaniu – sprawdzenie blokowane w projekt.js
   o.Nc = o.Aeff * fy / g0;
   // pas – klasa przy zginaniu względem osi z (pasy wspornikowe zginane w swojej płaszczyźnie: przyjęto klasę pasa)
-  o.Wz = o.kN.parts.every(p => p.cls <= 2) ? sec.Wpl_z : sec.Wel_z;
+  o.Wz = o.kN.cls <= 2 ? sec.Wpl_z : sec.Wel_z;
   o.Mcz = o.Wz * fy / g0;
   return o;
 };
@@ -180,11 +194,11 @@ R.MNpl = function (sec, fy, Nc, Mpos, g0) {
   let lo = 0, hi = sec.h;
   for (let k = 0; k < 60; k++) {
     const m = (lo + hi) / 2;
-    const a = P.integrals(P.clip(sec.pts, m, Mpos), 0).A;
+    const a = P.integrals(P.clip(sec.rings, m, Mpos), 0).A;
     if (Mpos) { if (a > Ac) lo = m; else hi = m; } else { if (a > Ac) hi = m; else lo = m; }
   }
   const zp = (lo + hi) / 2;
-  const up = P.integrals(P.clip(sec.pts, zp, true), sec.zc), dn = P.integrals(P.clip(sec.pts, zp, false), sec.zc);
+  const up = P.integrals(P.clip(sec.rings, zp, true), sec.zc), dn = P.integrals(P.clip(sec.rings, zp, false), sec.zc);
   // moment względem środka ciężkości: ściskanie u góry (Mpos) → M = fy(∫_up z − ∫_dn z)
   // moment względem środka ciężkości przekroju brutto (ściskanie po stronie Mpos)
   const M = fy * (up.Sz - dn.Sz);
@@ -203,7 +217,7 @@ R.ctx = function (sec, b, ndp, Nc, Mpos, Mneg) {
     else { eff = sign > 0 ? (b.effPos || R.effective(sec, fy, 'Mpos')) : (b.effNeg || R.effective(sec, fy, 'Mneg')); Wy = eff.Weff; }
     let MN = null, negl = true;
     if (k.cls <= 2) {
-      negl = Math.abs(Nc) <= 0.25 * b.Npl && Math.abs(Nc) <= 0.5 * sec.hw * sec.tw * fy / g0; // 6.2.9.1(4)
+      negl = Math.abs(Nc) <= 0.25 * b.Npl && Math.abs(Nc) <= 0.5 * sec.Aw * fy / g0; // 6.2.9.1(4)
       MN = negl ? Wy * fy / g0 : Math.min(Wy * fy / g0, R.MNpl(sec, fy, Nc, sign > 0, g0));
     }
     return { k, cls: k.cls, Wy, eff, MN, negl };
@@ -223,10 +237,9 @@ R.atPoint = function (sec, b, ndp, e, ctx) {
   out.rho = rho;
   let McRd = c.Wy * fy / g0, red = 1;
   if (rho > 0) {
-    if (c.cls <= 2) { const Aw = sec.hw * sec.tw; const Mv = (sec.Wpl_y - rho * Aw * Aw / (4 * sec.tw)) * fy / g0; red = Math.min(1, Mv / McRd); }
+    if (c.cls <= 2) { const Aw = sec.Aw; const Mv = (sec.Wpl_y - rho * Aw * Aw / (4 * sec.tw * (sec.nWeb || 1))) * fy / g0; red = Math.min(1, Mv / McRd); }
     else {
-      const s2 = Object.assign({}, sec, { tw: (1 - rho) * sec.tw, r: 0 });
-      const rp = P.rectProps(P.rects(s2).filter(r => r.id !== 'r'));
+      const rp = P.rectProps(P.rects(sec, (1 - rho) * sec.tw).filter(r => r.id !== 'r'));
       red = Math.min(1, Math.min(rp.Wt, rp.Wb) / Math.min(sec.Wel_t, sec.Wel_b));
     }
     McRd *= red;
@@ -235,7 +248,7 @@ R.atPoint = function (sec, b, ndp, e, ctx) {
   const n = Math.abs(Nc) / b.Npl;
   if (c.cls <= 2) {
     const MN = c.MN * red;
-    const a = Math.min(0.5, (sec.A - (sec.bg * sec.tg + sec.bd * sec.td)) / sec.A);
+    const a = sec.kind === 'RHS' ? Math.min(0.5, (sec.A - 2 * sec.b * sec.t) / sec.A) : sec.kind === 'I' ? Math.min(0.5, (sec.A - (sec.bg * sec.tg + sec.bd * sec.td)) / sec.A) : 0.5;
     const MNz = n <= a ? b.Mplz : b.Mplz * (1 - Math.pow((n - a) / (1 - a), 2));
     out.MN = MN; out.MNz = MNz;
     if (Mz > 0) { const be = Math.max(1, 5 * n); out.uMN = Math.pow(Math.abs(M) / MN, 2) + Math.pow(Mz / MNz, be); out.f = '6.41'; }
@@ -265,8 +278,9 @@ R.shearBuckling = function (sec, b, ndp, opt) {
   if (lw < 0.83 / eta) chi = eta;
   else if (lw < 1.08) chi = 0.83 / lw;
   else chi = rigid ? 1.37 / (0.7 + lw) : 0.83 / lw;
-  const Vbw = chi * fy * hw * t / (s3 * ndp.gM1);
-  const Vmax = eta * fy * hw * t / (s3 * ndp.gM1);
+  const nw = sec.nWeb || 1;
+  const Vbw = nw * chi * fy * hw * t / (s3 * ndp.gM1);
+  const Vmax = nw * eta * fy * hw * t / (s3 * ndp.gM1);
   return { need, limit, ht: hw / t, kt, a, lw, chi, Vbw, Vb: Math.min(Vbw, Vmax), Vmax, rigid };
 };
 
@@ -283,7 +297,7 @@ R.interMV = function (b, sb, M, V) {
 // o: { F [N], ss, typ: 'a'|'c', c (odległość do końca belki), pas: 'g'|'d', a (rozstaw żeber) }
 R.patch = function (sec, b, ndp, o) {
   const E = U.E, fyw = b.fy, fyf = b.fy, tw = sec.tw, hw = sec.hw;
-  const tf = o.pas === 'd' ? sec.td : sec.tg, bf = o.pas === 'd' ? sec.bd : sec.bg;
+  const tf = o.pas === 'd' ? sec.td : sec.tg, bf = sec.kind === 'RHS' ? sec.b / 2 : (o.pas === 'd' ? sec.bd : sec.bg);
   const a = o.a > 0 ? o.a : Infinity;
   const ss = Math.max(0, o.ss || 0), c = Math.max(0, o.c || 0);
   const m1 = fyf * bf / (fyw * tw);
@@ -307,8 +321,9 @@ R.patch = function (sec, b, ndp, o) {
   if (r.lF <= 0.5) r = run(0);
   const chi = Math.min(1, 0.5 / r.lF);
   const Leff = chi * r.ly;
-  const FRd = fyw * Leff * tw / ndp.gM1;
-  return Object.assign(r, { m1, chi, Leff, FRd, F: o.F, u: Math.abs(o.F) / FRd, tf, bf, ss, c, typ: o.typ });
+  const nw = sec.nWeb || 1;
+  const FRd = nw * fyw * Leff * tw / ndp.gM1;
+  return Object.assign(r, { m1, chi, Leff, FRd, F: o.F, u: Math.abs(o.F) / FRd, tf, bf, ss, c, typ: o.typ, nw });
 };
 
 /* ---------------------------------------------------------- żebro podporowe (PN-EN 1993-1-5, 9.4; PN-EN 1993-1-1, 6.3.1) */

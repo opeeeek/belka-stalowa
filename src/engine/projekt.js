@@ -74,7 +74,7 @@ J.run = function (st0, opt) {
   const err = (m) => out.errors.push(m), wrn = (m) => out.warnings.push(m);
   // --- profil normowy
   const nrm = N.ocen(st); out.norm = nrm;
-  nrm.bledy.forEach(err); nrm.ostrz.forEach(wrn);
+  nrm.bledy.forEach(err);   // ostrzeżenia dotyczące weryfikacji profilu – tylko w raporcie (sekcja Podstawa normowa)
   if (nrm.genStosowana !== 1 || !N.SILNIK[nrm.genStosowana]) { err('Silnik nie obsługuje stosowanej generacji – obliczenia przerwane.'); return out; }
   const ndp = Object.assign({}, nrm.ndp); out.ndp = ndp;
   ['gG_sup', 'gG_inf', 'gQ', 'xi', 'gG_sup_equ', 'gG_inf_equ', 'gQ_equ', 'KFI', 'gM0', 'gM1', 'gM2', 'lamLT0', 'betaLT', 'eta', 'gMfi', 'gFf', 'dTR', 'gc', 'acc', 'betaJ'].forEach(k => { ndp[k] = U.num(ndp[k]); });
@@ -87,12 +87,14 @@ J.run = function (st0, opt) {
   out.sec = sec;
   const gat = st.material.gatunek, pod = st.material.podgatunek;
   if (!M.STAL[gat]) { err('Nieznany gatunek stali.'); return out; }
-  const tMax = Math.max(sec.tg, sec.td, sec.tw);
+  const tMax = sec.tMax;
   const fyr = M.fy(gat, tMax, ndp.fySrc);
   if (fyr.poza) wrn('Grubość ścianki > 80 mm – poza zakresem tablicy 3.1.');
   const mat = { gatunek: gat, podgatunek: pod, fy: fyr.fy, fu: fyr.fu, zr: fyr.zr, tMax, E: U.E, G: U.G };
   out.mat = mat;
-  const base = R.basic(sec, mat, ndp); out.base = base;
+  let base;
+  try { base = R.basic(sec, mat, ndp); } catch (e) { err('Przekrój: ' + e.message); return out; }
+  out.base = base;
   // --- model i analiza
   const md = S.model(st, sec); out.md = md;
   md.err.forEach(err);
@@ -100,6 +102,7 @@ J.run = function (st0, opt) {
   let an;
   try { an = S.analyze(md, sec); } catch (e) { err('Analiza statyczna: ' + e.message); return out; }
   out.an = an;
+  if (base.effNerr && md.cases.some(c => c.Nn < 0)) err('Przekrój: ' + base.effNerr + ' (występuje siła ściskająca).');
   const gk = K.generate(md, an, ndp, { pozar: !!st.pozar.aktywny });
   gk.warn.forEach(wrn);
   const combos = gk.list; out.combos = combos;
@@ -107,6 +110,7 @@ J.run = function (st0, opt) {
   const ns = an.ns, xs = an.xs;
   const sb = R.shearBuckling(sec, base, ndp, { a: U.num(st.analiza.zebraRozstaw) * 1000, sztywny: !!st.analiza.slupekSztywny });
   out.sb = sb;
+  (sec.uwagi || []).forEach(u => out.info.push(u));
   const reg = {}; // najbardziej wytężone wystąpienie każdego sprawdzenia
   const rec = (key, o) => { if (!reg[key] || o.util > reg[key].util) reg[key] = o; };
   const better = (key, u) => !reg[key] || u > reg[key].util;
@@ -203,6 +207,7 @@ J.run = function (st0, opt) {
   // --- zwichrzenie i interakcja (każdy etap)
   out.ltb = [];
   for (let s = 0; s < md.nE; s++) {
+    if (sec.kind === 'L') { out.ltb.push(null); continue; }   // kątownik – element stężony (założenie modelu)
     const cl = Object.values(ltbCand[s]).sort((a, b) => b.v - a.v);
     const uniq = []; cl.forEach(c => { if (!uniq.includes(c.ci)) uniq.push(c.ci); });
     const cand = uniq.slice(0, opt.fast ? 3 : 6).map(ci => ({ combo: combos[ci], E: K.evaluate(an, combos[ci]) }));
@@ -236,7 +241,7 @@ J.run = function (st0, opt) {
   try { out.kr = J.brittle(st, md, an, combos, sec, base, mat, ndp, out); out.kr.checks.forEach(c => out.checks.push(c)); } catch (e) { err('Kruche pękanie: ' + e.message); }
   // --- klasa wykonania
   out.exc = X.exc(st.wykonanie, {
-    zmeczenie: !!st.zmeczenie.aktywny, spawana: sec.typ === 'spaw', fy: mat.fy, gatunek: gat, podgatunek: pod,
+    zmeczenie: !!st.zmeczenie.aktywny, spawana: sec.typ === 'spaw' || sec.kind === 'RHS' && sec.wyk === 'zimn', fy: mat.fy, gatunek: gat, podgatunek: pod,
     pozar: st.pozar.aktywny && out.pozar ? (out.pozar.prot ? `${st.pozar.ochrona === 'plyty' ? 'obudowa płytowa' : 'powłoka/natrysk'}: λp = ${st.pozar.lp} W/(m·K), dp = ${st.pozar.dp} mm (produkt z oceną właściwości użytkowych dla Ap/V = ${U.fmt(out.pozar.sf.ApV, 0)} m⁻¹, θcr = ${U.fmt(out.pozar.thcr, 0)} °C, R${st.pozar.R})` : `bez zabezpieczenia: θcr = ${U.fmt(out.pozar.thcr, 0)} °C`) : null,
     podniesienie: out.sgu && out.sgu.wcMax > 0.5 ? `strzałka podniesienia wykonawczego wc = ${U.fmt(out.sgu.wcMax, 0)} mm (kształt wg ugięcia od G)` : null,
     etapy: md.nE > 1 ? md.etapy.map((e, i) => `etap ${i + 1}: ${e.nazwa}`).join('; ') + (md.tmp.length ? `; podpory montażowe: ${md.tmp.map(t => `${t.id} (x = ${U.fmt(t.x / 1000, 2)} m, usunąć po etapie ${t.do + 1})`).join(', ')}` : '') + (md.stez.length ? `; stężenia: ${md.stez.map(z => `x = ${U.fmt(z.x / 1000, 2)} m od etapu ${z.od + 1}`).join(', ')}` : '') : null
@@ -357,10 +362,11 @@ J.supports = function (st, md, an, combos, sec, base, mat, ndp, env, out) {
     }
     const isEnd = !p.tymcz && ((p.idx === 0 && md.wL === 0) || (p.idx === md.sup.length - 1 && md.wP === 0));
     const w = p.wezel || { typ: 'brak' };
-    const conn = ['blacha_czolowa', 'blacha_zebrowa'].includes(w.typ);
+    let conn = ['blacha_czolowa', 'blacha_zebrowa'].includes(w.typ);
+    if (conn && !(sec.kind === 'I' || sec.kind === 'U')) { out.errors.push(`Podpora ${p.id}: połączenie śrubowe przez środnik (blacha czołowa/żebrowa) jest obsługiwane dla dwuteowników i ceowników – dla ${sec.kind === 'RHS' ? 'rur' : 'kątowników'} wybierz oparcie.`); conn = false; }
     // docisk środnika / żebro
-    if (!conn && Rmax > 0) {
-      if (w.zebro) {
+    if (!conn && Rmax > 0 && sec.kind !== 'L') {
+      if (w.zebro && (sec.kind === 'I' || sec.kind === 'U')) {
         const sr = R.stiffener(sec, base, ndp, { F: Rmax, bs: U.num(w.bs, 80), ts: U.num(w.ts, 10), ch: U.num(w.ch, 15), koniec: isEnd, e: U.num(p.src && p.src.c, 0) + U.num(p.ss) / 2 });
         r.zebro = sr;
         r.checks.push(BS.check({ id: `${p.id}-ZB`, grp, n: 'Żebro podporowe – wyboczenie (przekrój krzyżowy z 15εtw)', ref: 'PN-EN 1993-1-5 9.4; PN-EN 1993-1-1 6.3.1', Ed: Rmax, Rd: sr.NbRd, unit: 'F', util: sr.uB, x: p.x, combo: cMax !== null ? combos[cMax].opis : '', d: sr }));
@@ -478,7 +484,9 @@ J.brittle = function (st, md, an, combos, sec, base, mat, ndp, outAll) {
       sW = Math.max(sW, Math.abs(m) * Math.max(sec.h - sec.tg - sec.zc, sec.zc - sec.td) / sec.Iy + nT);
     }
   });
-  const els = [{ n: 'pas górny', t: sec.tg, s: sT }, { n: 'pas dolny', t: sec.td, s: sB }, { n: 'środnik', t: sec.tw, s: sW }];
+  const els = sec.kind === 'I' ? [{ n: 'pas górny', t: sec.tg, s: sT }, { n: 'pas dolny', t: sec.td, s: sB }, { n: 'środnik', t: sec.tw, s: sW }]
+    : sec.kind === 'U' ? [{ n: 'półki', t: sec.tf, s: Math.max(sT, sB) }, { n: 'środnik', t: sec.tw, s: sW }]
+      : [{ n: sec.kind === 'RHS' ? 'ścianki rury' : 'ramiona kątownika', t: sec.tMax, s: Math.max(sT, sB, sW) }];
   (outAll.podpory || []).forEach(p => {
     const w = p.wezel || {};
     if (['blacha_czolowa', 'blacha_zebrowa'].includes(w.typ) && U.num(w.tp) > 0) els.push({ n: `blacha połączenia ${p.id}`, t: U.num(w.tp), s: null });
@@ -503,6 +511,139 @@ J.brittle = function (st, md, an, combos, sec, base, mat, ndp, outAll) {
   return out;
 };
 
+
+/* ---------------------------------------------------------- schematy typowe */
+J.SCHEMATY = [
+  { id: 'swob', n: 'Belka swobodnie podparta', d: 'przegub – przegub (np. belka stropowa, nadproże)', przesla: 1, sup: ['przegub', 'przegub'] },
+  { id: 'wspornik', n: 'Wspornik', d: 'utwierdzenie – koniec swobodny (balkon, daszek)', przesla: 0, wspP: true, sup: ['utwierdzenie'] },
+  { id: 'utwprz', n: 'Utwierdzona – przegubowa', d: 'jeden koniec sztywny (węzeł momentowy), drugi przegubowy', przesla: 1, sup: ['utwierdzenie', 'przegub'] },
+  { id: 'utwutw', n: 'Obustronnie utwierdzona', d: 'oba końce sztywne', przesla: 1, sup: ['utwierdzenie', 'utwierdzenie'] },
+  { id: 'wspP', n: 'Jednoprzęsłowa ze wspornikiem', d: 'przęsło + wspornik prawy', przesla: 1, wspP: true, sup: ['przegub', 'przegub'] },
+  { id: 'wsp2', n: 'Jednoprzęsłowa z dwoma wspornikami', d: 'wsporniki z obu stron przęsła', przesla: 1, wspL: true, wspP: true, sup: ['przegub', 'przegub'] },
+  { id: 'c2', n: 'Belka ciągła dwuprzęsłowa', d: 'np. płatew, podciąg na 3 podporach', przesla: 2, sup: ['przegub', 'przegub', 'przegub'] },
+  { id: 'c3', n: 'Belka ciągła trzyprzęsłowa', d: '4 podpory', przesla: 3, sup: ['przegub', 'przegub', 'przegub', 'przegub'] },
+  { id: 'c4', n: 'Belka ciągła czteroprzęsłowa', d: '5 podpór', przesla: 4, sup: ['przegub', 'przegub', 'przegub', 'przegub', 'przegub'] },
+  { id: 'montaz', n: 'Belka z podporą montażową', d: 'etap 1 – podpora tymczasowa w środku, etap 2 – po jej usunięciu', przesla: 1, sup: ['przegub', 'przegub'], tmp: true },
+  { id: 'stropowa', n: 'Belka stropowa z etapem montażu', d: 'montaż bez stężenia pasa górnego, eksploatacja – pas górny stężony płytą', przesla: 1, sup: ['przegub', 'przegub'], stages: true }
+];
+J.applyScheme = function (st, id) {
+  const sc = J.SCHEMATY.find(q => q.id === id); if (!sc) return st;
+  const g = st.geom || (st.geom = {});
+  const L0 = U.num((g.przesla || [])[0], 6) || 6;
+  g.przesla = Array.from({ length: sc.przesla }, (_, i) => U.num((g.przesla || [])[i], L0) || L0);
+  g.wspL = sc.wspL ? (U.num(g.wspL) || Math.max(1, Math.round(L0 / 4 * 2) / 2)) : 0;
+  g.wspP = sc.wspP ? (U.num(g.wspP) || (sc.przesla ? Math.max(1, Math.round(L0 / 4 * 2) / 2) : L0 / 2)) : 0;
+  if (!sc.przesla && sc.wspP) g.wspP = U.num(g.wspP) || 2;
+  const old = st.podpory || [];
+  st.podpory = sc.sup.map((t, i) => Object.assign({ ss: 100, c: 0, wezel: { typ: 'brak' } }, old[i] || {}, { typ: t, ltb: t === 'utwierdzenie' ? 'pelne' : 'widelkowe' }));
+  st.schemat = id;
+  if (sc.tmp) {
+    if (!st.etapy || st.etapy.length < 2) st.etapy = [{ id: 'E1', nazwa: 'Montaż – na podporze tymczasowej', typ: 'montaz', opis: '' }, { id: 'E2', nazwa: 'Eksploatacja', typ: 'eksploatacja', opis: '' }];
+    st.podporyTymczasowe = [{ x: (g.wspL || 0) + g.przesla[0] / 2, usunietaPo: 0, ss: 100 }];
+  } else st.podporyTymczasowe = [];
+  if (sc.stages) {
+    st.etapy = [{ id: 'E1', nazwa: 'Montaż – układanie płyt stropowych', typ: 'montaz', opis: 'Belka bez stężenia pasa górnego.' }, { id: 'E2', nazwa: 'Eksploatacja', typ: 'eksploatacja', opis: 'Pas górny stężony ciągle przez płyty.' }];
+    st.stezenieCiagle = Object.assign({}, st.stezenieCiagle, { pasG: true, odEtapu: 1 });
+  }
+  if (!sc.tmp && !sc.stages && st.etapy && st.etapy.length > 1 && id !== st._keepStages) { /* etapy pozostają – zmienia je użytkownik */ }
+  return st;
+};
+
+/* ---------------------------------------------------------- dobór */
+// grupy sprawdzeń pomijane w doborze przekroju (połączenia/oparcia dobiera „Dobierz węzły”; pożar – zabezpieczenie; kruche pękanie – gatunek)
+const MEMBER = (c) => !/^Podpory|^Pożar|^Kruche|^Zmęczenie/.test(c.grp);
+J.passesFor = function (r, eta, filt) {
+  if (r.errors.length) return false;
+  return r.checks.filter(c => !c.info && (!filt || filt(c))).every(c => c.status !== 'fail' && (c.util === null || !isFinite(c.util) ? c.status !== 'fail' : c.util <= eta + 1e-9));
+};
+J.memberFilter = MEMBER;
+// kandydaci przekroju tego samego rodzaju, rosnąco wg masy
+J.doborKandydaci = function (st) {
+  const d = st.przekroj || {};
+  if (d.typ === 'spaw') {
+    const out = [], h = U.num(d.h, 600), b = U.num(d.bg, 250), aw = U.num(d.aw, 4);
+    [6, 8, 10, 12, 14, 16, 20].forEach(tw => [8, 10, 12, 14, 15, 16, 18, 20, 22, 25, 28, 30, 35, 40].forEach(tf => {
+      const q = { typ: 'spaw', h, bg: b, tg: tf, bd: d.sym === false ? U.num(d.bd, b) : b, td: tf, tw, aw: Math.max(aw, Math.min(tw, 0.5 * tw)) };
+      out.push({ d: q, masa: (2 * b * tf + (h - 2 * tf) * tw) * 1e-6 * U.RHO, nazwa: `I ${h}×${b}×${tw}×${tf}` });
+    }));
+    return out.sort((a, c) => a.masa - c.masa);
+  }
+  const typ = d.typ || 'walc';
+  if (typ === 'walc') return P.katalog('walc', [d.seria || 'IPE']);
+  if (typ === 'rura') { const L = P.katalog('rura', Object.assign([d.seria === 'wlasna' ? 'RHS' : (d.seria || 'SHS')], { wyk: d.wyk })); L.forEach(c => { c.d.wyk = d.wyk; }); return L; }
+  if (typ === 'kat') { const L = P.katalog('kat', [d.seria || 'L']); L.forEach(c => { c.d.poz = d.poz; }); return L; }
+  return P.katalog(typ, [d.seria]);
+};
+
+/* dobór węzłów i oparć przy znanych reakcjach (wynik obliczeń r) */
+J.dobierzWezly = function (st0, r, eta) {
+  const st = U.clone(st0), log = [];
+  eta = eta || 1;
+  if (!r || !r.podpory) return { st, log: ['Brak wyników – najpierw usuń błędy danych.'], ok: false };
+  const sec = r.sec, mat = r.mat, ndp = r.ndp, base = r.base;
+  let allOk = true;
+  r.podpory.forEach((p, k) => {
+    if (p.tymcz) return;
+    const sp = st.podpory[p.idx === undefined ? k : p.idx] || st.podpory[k]; if (!sp) return;
+    const w = sp.wezel || (sp.wezel = { typ: 'brak' });
+    const R0 = p.Rmax; if (!(R0 > 0)) return;
+    const okU = (o) => o.checks.every(c => c.u <= eta + 1e-9) && (!o.detal || o.detal.every(d => d.ok));
+    if (w.typ === 'blacha_czolowa' && (sec.kind === 'I' || sec.kind === 'U')) {
+      // przegląd wariantów – najmniejszy „koszt” (śruby, blacha, spoiny) przy spełnionych warunkach; kara za tp > d/2 (zdolność do obrotu przegubu)
+      let found = null, best = Infinity;
+      for (const d of ['M12', 'M16', 'M20', 'M24']) { const b0 = M.SRUBY[d]; for (let nr = 1; nr <= 8; nr++) for (const tp of [8, 10, 12, 15]) for (const a of [3, 4, 5, 6, 7, 8]) {
+        const e1 = Math.ceil(1.5 * b0.d0 / 5) * 5, p1 = Math.ceil(Math.max(2.2 * b0.d0, 3 * b0.d) / 5) * 5, e2 = Math.ceil(1.5 * b0.d0 / 5) * 5;
+        const p3 = Math.ceil(Math.max(2.4 * b0.d0, sec.tw + 2 * a + 2 * b0.d) / 10) * 10, hp = Math.max(Math.ceil(0.6 * sec.hw / 10) * 10, 2 * e1 + (nr - 1) * p1);
+        if (hp > sec.hw - 10) continue;
+        const wv = Object.assign({}, w, { hp, bp: p3 + 2 * e2, tp, nr, d, kl: w.kl || '8.8', e1, p1, e2, p3, a, tsup: U.num(w.tsup, 12), fusup: U.num(w.fusup, 360), gwint: w.gwint !== false });
+        let o; try { o = C.endPlate(sec, mat, ndp, wv, R0); } catch (e) { continue; }
+        if (!okU(o)) continue;
+        const cost = 2 * nr * b0.d * b0.d * 0.6 + hp * wv.bp * tp * 0.0008 + 2 * hp * a * a * 0.05 + (tp > b0.d / 2 ? 1e4 : 0);
+        if (cost < best) { best = cost; found = wv; }
+      } }
+      if (found) { Object.assign(w, found); log.push(`Podpora ${p.id}: blacha czołowa ${found.hp}×${found.bp}×${found.tp} mm, śruby 2×${found.nr} ${found.d} kl. ${found.kl}, spoiny a = ${found.a} mm.`); }
+      else { allOk = false; log.push(`Podpora ${p.id}: nie znaleziono krótkiej blachy czołowej spełniającej warunki – rozważ blachę żebrową lub oparcie.`); }
+    } else if (w.typ === 'blacha_zebrowa' && (sec.kind === 'I' || sec.kind === 'U')) {
+      let found = null, best = Infinity;
+      for (const d of ['M16', 'M20', 'M24']) { const b0 = M.SRUBY[d]; for (let n = 2; n <= 8; n++) for (const tp of [8, 10, 12, 15]) for (const a of [4, 5, 6, 7, 8, 10]) {
+        const e1 = Math.ceil(1.5 * b0.d0 / 5) * 5, p1 = Math.ceil(Math.max(2.2 * b0.d0, 3 * b0.d) / 5) * 5, e2 = Math.ceil(1.5 * b0.d0 / 5) * 5;
+        const hp = 2 * e1 + (n - 1) * p1; if (hp > sec.hw - 10) continue;
+        const wv = Object.assign({}, w, { hp, tp, n, d, kl: w.kl || '8.8', e1, p1, e2, z: U.num(w.z, 60), e2b: Math.max(U.num(w.e2b, 40), e2), a, gwint: w.gwint !== false });
+        let o; try { o = C.finPlate(sec, mat, ndp, wv, R0); } catch (e) { continue; }
+        if (!okU(o)) continue;
+        const aMin = (mat.fy >= 355 ? 0.6 : 0.5) * tp;
+        const cost = n * b0.d * b0.d * 0.6 + hp * (wv.z + e2) * tp * 0.0008 + 2 * hp * a * a * 0.05 + (tp > b0.d / 2 ? 1e4 : 0) + (a < aMin ? 1e4 : 0) + (hp < 0.6 * sec.hw ? 2e3 : 0);
+        if (cost < best) { best = cost; found = wv; }
+      } }
+      if (found) { Object.assign(w, found); log.push(`Podpora ${p.id}: blacha żebrowa ${found.hp}×${found.tp} mm, ${found.n} × ${found.d} kl. ${found.kl}, spoiny a = ${found.a} mm.`); }
+      else { allOk = false; log.push(`Podpora ${p.id}: nie znaleziono blachy żebrowej spełniającej warunki.`); }
+    } else if (sec.kind !== 'L') {
+      // oparcie – płyta podporowa i ewentualne żebra
+      if (w.typ === 'oparcie' && w.podloze !== 'stal') {
+        let ok = false;
+        for (const lp of [100, 120, 150, 180, 200, 250, 300, 350, 400]) { for (const tp of [10, 12, 15, 20, 25, 30]) {
+          const bp = Math.max(U.num(w.bp, 0), Math.ceil((Math.max(sec.bd || sec.b, sec.b) + 40) / 10) * 10);
+          const wv = { podloze: w.podloze, bp, lp, tp, beton: w.beton, alfa: w.alfa, fd: w.fd, beta: w.beta, lb: lp };
+          const o = C.bearingPlate(sec, mat, ndp, wv, R0);
+          if (o.checks.every(c => c.u <= eta + 1e-9)) { Object.assign(w, { bp, lp, tp, lb: lp }); ok = true; break; } } if (ok) break; }
+        log.push(ok ? `Podpora ${p.id}: płyta podporowa ${w.bp}×${w.lp}×${w.tp} mm.` : `Podpora ${p.id}: docisk do podłoża niewystarczający nawet dla płyty 400 mm – zwiększ podłoże/wieniec.`);
+        if (!ok) allOk = false;
+      }
+      if (sec.kind === 'I' || sec.kind === 'U' || sec.kind === 'RHS') {
+        const isEnd = (p.idx === 0 && U.num(st.geom.wspL) === 0) || (p.idx === r.md.sup.length - 1 && U.num(st.geom.wspP) === 0);
+        const pr = R.patch(sec, base, ndp, { F: R0, ss: U.num(sp.ss, 0), typ: isEnd ? 'c' : 'a', c: U.num(sp.c, 0), pas: 'd', a: U.num(st.analiza.zebraRozstaw) * 1000 });
+        if (pr.u > eta && (sec.kind === 'I' || sec.kind === 'U')) {
+          const bsMax = Math.floor(((sec.kind === 'U' ? sec.b - sec.tw : (Math.min(sec.bg, sec.bd) - sec.tw) / 2) - 5) / 5) * 5;
+          let ok = false;
+          for (const ts of [8, 10, 12, 15, 20, 25]) { const sr = R.stiffener(sec, base, ndp, { F: R0, bs: bsMax, ts, ch: 15, koniec: isEnd, e: U.num(sp.c, 0) + U.num(sp.ss) / 2 }); if (sr.uB <= eta && sr.uC <= eta && sr.ctS <= sr.ctLim) { Object.assign(w, { zebro: true, bs: bsMax, ts, ch: 15 }); ok = true; break; } }
+          log.push(ok ? `Podpora ${p.id}: docisk środnika niewystarczający (${Math.round(pr.u * 100)}%) – dodano żebra podporowe 2×${w.bs}×${w.ts} mm.` : `Podpora ${p.id}: nie dobrano żeber podporowych.`);
+          if (!ok) allOk = false;
+        } else if (w.zebro && pr.u <= eta * 0.9) { log.push(`Podpora ${p.id}: żebra podporowe nie są wymagane (docisk środnika ${Math.round(pr.u * 100)}%).`); }
+      }
+    }
+  });
+  return { st, log, ok: allOk };
+};
 /* ---------------------------------------------------------- dobór kształtownika */
 J.SERIE_DOBOR = ['IPE', 'HEA', 'HEB', 'HEM'];
 J.candidates = function (series) {

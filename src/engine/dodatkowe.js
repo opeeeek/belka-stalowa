@@ -22,7 +22,7 @@ X.sectionFactor = function (sec, eksp, ochrona) {
   const Pk = eksp === '3' ? P - sec.bg : P;               // kontur (górna powierzchnia pasa przykryta płytą)
   const Pb = eksp === '3' ? 2 * sec.h + b : 2 * sec.h + 2 * b; // „pudełko”
   const A = sec.A;
-  return { P, Pk, Pb, AmV: Pk / A * 1000, AmVb: Pb / A * 1000, ApV: (ochrona === 'plyty' ? Pb : Pk) / A * 1000 };
+  return { P, Pk, Pb, AmV: Pk / A * 1000, AmVb: Pb / A * 1000, ApV: (ochrona === 'plyty' ? Pb : Pk) / A * 1000, kind: sec.kind, closed: sec.kind === 'RHS' };
 };
 
 // przyrost temperatury: zwraca historię θa(t) co 30 s do tmax [min]
@@ -30,7 +30,7 @@ X.heating = function (sf, o, tmax) {
   const dt = 2, rho = U.RHO, sig = 5.67e-8, ac = 25, em = 0.7, ef = 1.0;
   let th = 20, thg = 20; const hist = [[0, 20, 20]];
   const prot = o.ochrona && o.ochrona !== 'brak';
-  const ksh = prot ? 1 : Math.min(1, 0.9 * sf.AmVb / sf.AmV);
+  const ksh = prot ? 1 : sf.closed ? 1 : sf.kind === 'I' ? Math.min(1, 0.9 * sf.AmVb / sf.AmV) : Math.min(1, sf.AmVb / sf.AmV);
   const lp = U.num(o.lp, 0.12), dp = U.num(o.dp, 20) / 1000, cp = U.num(o.cp, 1200), rp = U.num(o.rp, 300);
   for (let t = dt; t <= tmax * 60 + 1e-9; t += dt) {
     const thg1 = X.iso834(t / 60);

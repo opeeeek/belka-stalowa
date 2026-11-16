@@ -21,6 +21,8 @@ T.chi = (lam, al) => { if (lam <= 0.2) return 1; const ph = 0.5 * (1 + al * (lam
 
 // krzywe wyboczenia giętnego – tabl. 6.2
 T.curveFlex = function (sec, fy) {
+  if (sec.kind === 'U' || sec.kind === 'L') return { y: 'c', z: 'c' };
+  if (sec.kind === 'RHS') return sec.wyk === 'zimn' ? { y: 'c', z: 'c' } : fy >= 460 ? { y: 'a0', z: 'a0' } : { y: 'a', z: 'a' };
   const hb = sec.h / Math.max(sec.bg, sec.bd), tf = Math.max(sec.tg, sec.td);
   if (sec.typ === 'walc') {
     if (fy >= 460) { if (hb > 1.2) return tf <= 40 ? { y: 'a0', z: 'a0' } : { y: 'a', z: 'a' }; return tf <= 100 ? { y: 'a', z: 'a' } : { y: 'c', z: 'c' }; }
@@ -31,6 +33,7 @@ T.curveFlex = function (sec, fy) {
 };
 // krzywe zwichrzenia – tabl. 6.4 (ogólna) i 6.5 (6.3.2.3)
 T.curveLT = function (sec, met) {
+  if (sec.kind !== 'I') return 'd';   // tabl. 6.4 – inne przekroje
   const hb = sec.h / Math.min(sec.bg, sec.bd);
   if (met === '6.3.2.3') return sec.typ === 'walc' ? (hb <= 2 ? 'b' : 'c') : (hb <= 2 ? 'c' : 'd');
   return sec.typ === 'walc' ? (hb <= 2 ? 'a' : 'b') : (hb <= 2 ? 'c' : 'd');
@@ -176,7 +179,7 @@ T.Cm = function (sh, conc) {
 // cand: [{ combo, E: wynik kombinacji }]
 T.stage = function (md, an, sec, base, ndp, s, cand, opt) {
   const E = U.E, G = U.G, fy = base.fy;
-  const met = sec.sym ? (ndp.ltbMet || '6.3.2.3') : '6.3.2.2';
+  const met = sec.kind === 'I' && sec.sym ? (ndp.ltbMet || '6.3.2.3') : '6.3.2.2';
   const segs = T.segments(md, s);
   const runs = [];
   cand.forEach(cd => {

@@ -32,8 +32,9 @@ const LIT = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 S.model = function (st, sec) {
   const g = st.geom || {}, err = [];
   const spans = (g.przesla || []).map(v => U.num(v) * 1000).filter(v => v > 0);
-  if (!spans.length) err.push('Podaj co najmniej jedno przęsło o dodatniej długości.');
   const wL = Math.max(0, U.num(g.wspL) * 1000), wP = Math.max(0, U.num(g.wspP) * 1000);
+  if (!spans.length && !(wL > 0 || wP > 0)) err.push('Podaj co najmniej jedno przęsło lub wspornik o dodatniej długości.');
+  if (!spans.length && wL > 0 && wP > 0) err.push('Wspornik z obu stron jednej podpory – zadaj przęsło albo jeden wspornik.');
   const L = wL + U.sum(spans) + wP;
   // podpory stałe
   const xsup = [wL]; spans.forEach(s => xsup.push(xsup[xsup.length - 1] + s));
@@ -48,7 +49,8 @@ S.model = function (st, sec) {
       ss: Math.max(0, U.num(p.ss, 100)), wezel: p.wezel || { typ: 'brak' }, src: p
     };
   });
-  if (spans.length && sup.length !== spans.length + 1) err.push('Niezgodna liczba podpór.');
+  if (sup.length !== spans.length + 1) err.push('Niezgodna liczba podpór.');
+  if (!spans.length && sup[0] && sup[0].typ !== 'utwierdzenie') err.push('Wspornik wymaga utwierdzenia w podporze.');
   // podpory tymczasowe (montażowe)
   const etapy = (st.etapy && st.etapy.length) ? st.etapy : [{ id: 'E1', nazwa: 'Eksploatacja', typ: 'eksploatacja' }];
   const nE = etapy.length;
