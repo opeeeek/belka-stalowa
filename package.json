@@ -1,0 +1,12 @@
+{
+  "name": "belka-stalowa",
+  "version": "1.0.0",
+  "description": "BelkaStal – analiza i projektowanie belek stalowych wg Eurokodów (PN-EN), z profilem normowym i odtwarzalnym raportem",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/",
+    "check": "node build.mjs && node --test test/"
+  }
+}
