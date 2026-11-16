@@ -321,13 +321,13 @@ F.freq = function (m) {
     const y = bandSolve(K, bandMul(Mm, x)); fixed.forEach(i => { y[i] = 0; });
     const My = bandMul(Mm, y); let num = 0, den = 0; const Mx = bandMul(Mm, x);
     for (let i = 0; i < n; i++) { num += y[i] * Mx[i]; den += y[i] * My[i]; }
-    const lnew = num / den; // ≈ 1/ω² → ω² = 1/lnew·… (Rayleigh)
+    const lnew = num / den; // iloraz Rayleigha: ω² = yᵀKy / yᵀMy = yᵀMx / yᵀMy
     let s = 0; for (let i = 0; i < n; i++) s += y[i] * My[i]; s = Math.sqrt(s) || 1;
     for (let i = 0; i < n; i++) x[i] = y[i] / s;
     if (it > 5 && Math.abs(lnew - lam) < 1e-12 * Math.abs(lnew)) { lam = lnew; break; }
     lam = lnew;
   }
-  const w2 = 1 / lam; // num/den = (y·Mx)/(y·My) – Rayleigh dla ω²
+  const w2 = lam;
   const f = Math.sqrt(Math.abs(w2)) / (2 * Math.PI);
   const shape = []; for (let i = 0; i < xs.length; i++) shape.push(x[2 * i]);
   return { f, shape };
