@@ -207,7 +207,7 @@ T.stage = function (md, an, sec, base, ndp, s, cand, opt) {
       if (!sg.free) {
         if (ndp.kcMet === '1') { kc = 1; kcSrc = 'kc = 1 (przyjęto bezpiecznie, f = 1)'; }
         else if (best.sh.linear) { kc = Math.min(1, 1 / (1.33 - 0.33 * best.sh.psi)); kcSrc = `tabl. 6.6: kc = 1/(1,33 − 0,33ψ), ψ = ${U.fmt(best.sh.psi, 3)}`; }
-        else { try { C1 = T.C1seg(sec, E, G, sg, best.E.M, an.xs); kc = Math.min(1, 1 / Math.sqrt(C1)); kcSrc = `kc = 1/√C1, C1 = ${U.fmt(C1, 3)} (MES segmentu)`; } catch (e) { kc = 1; kcSrc = 'kc = 1 (C1 nie wyznaczono)'; } }
+        else { try { C1 = T.C1seg(sec, E, G, sg, best.E.M, an.xs); kc = U.clamp(1 / Math.sqrt(C1), 0.6, 1); kcSrc = `kc = 1/√C1 ≥ 0,6 (zakres tabl. 6.6), C1 = ${U.fmt(C1, 3)} (MES segmentu)`; } catch (e) { kc = 1; kcSrc = 'kc = 1 (C1 nie wyznaczono)'; } }
       }
       const o = T.chiLT(best.lam, best.sh.mabs, best.Mcr, sec, ndp, kc, met);
       best.ltb = o; best.ltb.kcSrc = kcSrc; best.ltb.C1 = C1;

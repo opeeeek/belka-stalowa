@@ -59,16 +59,20 @@ X.fireUtil = function (sec, base, ndp, Efi, th, kap) {
   const W = cls <= 2 ? sec.Wpl_y : Math.min(sec.Wel_t, sec.Wel_b);
   const MRd = ky * W * fy / gfi / (kap.k1 * kap.k2);
   // zwichrzenie 4.2.3.3(4)/4.2.3.4(2)
-  let chi = 1, lamT = 0;
+  // zwichrzenie w pożarze – tylko dla belek niestężonych bocznie (λ̄LT w temp. normalnej > 0,2)
+  let chi = 1, lamT = 0, ltb = false;
   if (Efi.Mcr && isFinite(Efi.Mcr)) {
     const lam = Math.sqrt(W * fy / Efi.Mcr);
-    lamT = lam * Math.sqrt(ky / kE);
-    const a = 0.65 * Math.sqrt(235 / fy), ph = 0.5 * (1 + a * lamT + lamT * lamT);
-    chi = Math.min(1, 1 / (ph + Math.sqrt(ph * ph - lamT * lamT)));
+    if (lam > 0.2) {
+      ltb = true;
+      lamT = lam * Math.sqrt(ky / Math.max(kE, 1e-9));
+      const a = 0.65 * Math.sqrt(235 / fy), ph = 0.5 * (1 + a * lamT + lamT * lamT);
+      chi = Math.min(1, 1 / (ph + Math.sqrt(ph * ph - lamT * lamT)));
+    }
   }
-  const Mb = chi * W * ky * fy / gfi;
+  const Mb = ltb ? chi * W * ky * fy / gfi : Infinity;
   const VRd = ky * base.Vpl * ndp.gM0 / gfi;
-  return { th, ky, kE, cls, W, MRd, chi, lamT, Mb, VRd, uM: Math.abs(Efi.M) / MRd, uLT: Math.abs(Efi.Mlt || Efi.M) / Mb, uV: Math.abs(Efi.V) / VRd };
+  return { th, ky, kE, cls, W, MRd, chi, lamT, ltb, Mb, VRd, uM: Math.abs(Efi.M) / MRd, uLT: ltb ? Math.abs(Efi.Mlt || Efi.M) / Mb : 0, uV: Math.abs(Efi.V) / VRd };
 };
 
 X.fire = function (sec, base, ndp, o, Efi) {

@@ -6,7 +6,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "node build.mjs",
-    "test": "node --test test/",
-    "check": "node build.mjs && node --test test/"
+    "test": "node --test test/*.test.js",
+    "check": "node build.mjs && node --test test/*.test.js"
   }
 }

@@ -2,3 +2,4 @@ node_modules/
 *.log
 host/*.exe
 host/*.syso
+host/app.html

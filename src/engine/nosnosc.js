@@ -104,7 +104,7 @@ R.effective = function (sec, fy, mode) {
     if (cut > 1e-6) {
       const r = rects.find(q => q.id === id);
       rects = rects.filter(q => q !== r);
-      rects.push(Object.assign({}, r, { y0: r.y0 + cut, id: id + 'L' }), Object.assign({}, r, { y1: r.y1 - cut, id: id + 'P' }));
+      rects.push(Object.assign({}, r, { y0: r.y0 + cut, y1: r.y1 - cut, id: id + 'e' })); // części nieefektywne przy krawędziach swobodnych
     }
   };
   if (mode === 'Mpos' || mode === 'N') cutFlange('fg', sec.c_fg, sec.tg);
