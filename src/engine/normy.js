@@ -62,7 +62,7 @@ const DOC1 = [
   { k: 'EN1991-1-4', oznaczenie: 'PN-EN 1991-1-4:2008', en: 'EN 1991-1-4:2005', tytul: 'Eurokod 1 – Oddziaływania ogólne – Oddziaływania wiatru',
     zmiany: ['PN-EN 1991-1-4:2008/A1:2010'], poprawki: ['PN-EN 1991-1-4:2008/AC:2009'], zk: 'PN-EN 1991-1-4:2008/NA:2010', gdy: has('W'), zakres: 'ciśnienie/ssanie wiatru na przekrycie przekazywane na belkę', pewnosc: 'sprawdz' },
   { k: 'EN1991-1-5', oznaczenie: 'PN-EN 1991-1-5:2005', en: 'EN 1991-1-5:2003', tytul: 'Eurokod 1 – Oddziaływania ogólne – Oddziaływania termiczne',
-    zmiany: [], poprawki: ['PN-EN 1991-1-5:2005/AC:2009'], zk: 'Załącznik krajowy NA – w polskiej wersji normy (mapy Tmin/Tmax)', gdy: (st) => has('T')(st) || true, zakres: 'temperatura minimalna Tmd do doboru gatunku stali (PN-EN 1993-1-10), oddziaływania termiczne', pewnosc: 'tak' },
+    zmiany: [], poprawki: ['PN-EN 1991-1-5:2005/AC:2009'], zk: 'Załącznik krajowy NA – w polskiej wersji normy (mapy Tmin/Tmax)', gdy: always, zakres: 'temperatura minimalna Tmd do doboru gatunku stali (PN-EN 1993-1-10), oddziaływania termiczne', pewnosc: 'tak' },
   { k: 'EN1991-1-6', oznaczenie: 'PN-EN 1991-1-6:2007', en: 'EN 1991-1-6:2005', tytul: 'Eurokod 1 – Oddziaływania ogólne – Oddziaływania w czasie wykonywania konstrukcji',
     zmiany: [], poprawki: ['PN-EN 1991-1-6:2007/AC:2008'], zk: 'Załącznik krajowy NA – w polskiej wersji normy', gdy: (st) => stages(st) || has('Qc')(st), zakres: 'obciążenia montażowe Qca…Qcf, sytuacje przejściowe – etapy realizacji', pewnosc: 'tak' },
   { k: 'EN1991-1-7', oznaczenie: 'PN-EN 1991-1-7:2008', en: 'EN 1991-1-7:2006', tytul: 'Eurokod 1 – Oddziaływania ogólne – Oddziaływania wyjątkowe',

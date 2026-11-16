@@ -226,74 +226,89 @@ const GP4 = [[-0.8611363115940526, 0.3478548451374538], [-0.3399810435848563, 0.
         springs: [{x, k, zr}] (boczne na wysokości zr nad ŚŚ), [{x, kt}] (skrętne) }
    Zwraca λcr (najmniejsza dodatnia) i postać (u, φ w węzłach). */
 F.ltb = function (m) {
-  const xs = m.xs, ne = xs.length - 1, nn = xs.length, n = 4 * nn;
-  const KE = []; const KG = [];
-  for (let i = 0; i < n; i++) { KE.push(new Float64Array(n)); KG.push(new Float64Array(n)); }
-  const map = (e) => [4 * e, 4 * e + 1, 4 * e + 4, 4 * e + 5]; // u-dofs
-  const mapp = (e) => [4 * e + 2, 4 * e + 3, 4 * e + 6, 4 * e + 7]; // φ-dofs
+  const xs = m.xs, ne = xs.length - 1, nn = xs.length, n = 4 * nn, HB = 7;
+  const KE = bandNew(n, HB), KG = bandNew(n, HB);
+  const ke = [], kg = [];
+  for (let a = 0; a < 8; a++) { ke.push(new Float64Array(8)); kg.push(new Float64Array(8)); }
+  const UI = [0, 1, 4, 5], PI = [2, 3, 6, 7];
   for (let e = 0; e < ne; e++) {
-    const L = xs[e + 1] - xs[e], iu = map(e), ip = mapp(e);
+    const L = xs[e + 1] - xs[e];
+    for (let a = 0; a < 8; a++) { ke[a].fill(0); kg[a].fill(0); }
     const [Ma, Mm, Mb] = m.Mfun(e);
     const ql = m.qe ? m.qe(e) : [];
     for (const [g, wg] of GP4) {
       const t = (g + 1) / 2, W = wg * L / 2, H = herm(t, L);
       const Mx = Ma * (1 - t) * (1 - 2 * t) + Mm * 4 * t * (1 - t) + Mb * t * (2 * t - 1);
-      let qh = 0; ql.forEach(q => { qh += (q.w0 + (q.w1 - q.w0) * t) * q.e; });
+      let qh = 0; for (const q of ql) qh += (q.w0 + (q.w1 - q.w0) * t) * q.e;
       for (let a = 0; a < 4; a++) for (let b = 0; b < 4; b++) {
-        KE[iu[a]][iu[b]] += W * m.EIz * H.d2[a] * H.d2[b];
-        KE[ip[a]][ip[b]] += W * (m.EIw * H.d2[a] * H.d2[b] + m.GIt * H.d1[a] * H.d1[b]);
-        // K_L: −M(u''φ + φu'') + M βz φ'φ' − q e φφ ;  K_G = −K_L
+        ke[UI[a]][UI[b]] += W * m.EIz * H.d2[a] * H.d2[b];
+        ke[PI[a]][PI[b]] += W * (m.EIw * H.d2[a] * H.d2[b] + m.GIt * H.d1[a] * H.d1[b]);
+        // K_L = −M(u''φ + φu'') + M·βz·φ'φ' − q·e·φφ ;  K_G = −K_L
         const c = -Mx * H.d2[a] * H.N[b];
-        KG[iu[a]][ip[b]] -= W * c; KG[ip[b]][iu[a]] -= W * c;
-        KG[ip[a]][ip[b]] -= W * (Mx * (m.betaZ || 0) * H.d1[a] * H.d1[b] - qh * H.N[a] * H.N[b]);
+        kg[UI[a]][PI[b]] -= W * c; kg[PI[b]][UI[a]] -= W * c;
+        kg[PI[a]][PI[b]] -= W * (Mx * (m.betaZ || 0) * H.d1[a] * H.d1[b] - qh * H.N[a] * H.N[b]);
       }
     }
+    const i0 = 4 * e;
+    for (let a = 0; a < 8; a++) for (let b = a; b < 8; b++) { if (ke[a][b]) bandAdd(KE, i0 + a, i0 + b, ke[a][b]); if (kg[a][b]) bandAdd(KG, i0 + a, i0 + b, kg[a][b]); }
   }
-  (m.pts || []).forEach(p => { const i = F.nodeAt(xs, p.x); KG[4 * i + 2][4 * i + 2] -= -p.P * p.e; });
+  (m.pts || []).forEach(p => { const i = F.nodeAt(xs, p.x); bandAdd(KG, 4 * i + 2, 4 * i + 2, p.P * p.e); });
   // sprężyny (kara) – skala względem sztywności
   const Lt = xs[nn - 1] - xs[0], kref = Math.max(m.EIz, m.GIt * Lt * Lt / 10, m.EIw / (Lt * Lt)) / Math.pow(Lt / 20, 3) * 1e4;
   (m.springs || []).forEach(s => {
-    const i = F.nodeAt(xs, s.x);
-    if (s.zr !== undefined && s.k !== 0) { // u_p = u − zr·φ
-      const k = s.k === 'rigid' || s.k === undefined ? kref : s.k, a = 4 * i, b = 4 * i + 2;
-      KE[a][a] += k; KE[a][b] -= k * s.zr; KE[b][a] -= k * s.zr; KE[b][b] += k * s.zr * s.zr;
-    }
-    if (s.kt) { const k = s.kt === 'rigid' ? kref * Lt * Lt : s.kt; KE[4 * i + 2][4 * i + 2] += k; }
+    const i = F.nodeAt(xs, s.x), a = 4 * i, b = 4 * i + 2;
+    if (s.zr !== undefined && s.k !== 0) { const k = s.k === 'rigid' || s.k === undefined ? kref : s.k; bandAdd(KE, a, a, k); bandAdd(KE, a, b, -k * s.zr); bandAdd(KE, b, b, k * s.zr * s.zr); }
+    if (s.kt) { const k = s.kt === 'rigid' ? kref * Lt * Lt : s.kt; bandAdd(KE, b, b, k); }
   });
-  // więzy sztywne – eliminacja
+  // więzy sztywne: wiersz/kolumna jednostkowa w K_E, zerowa w K_G
   const fixed = new Set();
   (m.bc || []).forEach(b => { const i = F.nodeAt(xs, b.x); if (b.u) fixed.add(4 * i); if (b.du) fixed.add(4 * i + 1); if (b.phi) fixed.add(4 * i + 2); if (b.dphi) fixed.add(4 * i + 3); });
-  const free = []; for (let i = 0; i < n; i++) if (!fixed.has(i)) free.push(i);
-  const nf = free.length;
-  const A = free.map(i => free.map(j => KE[i][j]));
-  const B = free.map(i => free.map(j => KG[i][j]));
-  // Cholesky A = L L^T
-  const Lm = A.map(r => new Float64Array(nf));
-  for (let i = 0; i < nf; i++) {
-    for (let j = 0; j <= i; j++) {
-      let s = A[i][j]; for (let k = 0; k < j; k++) s -= Lm[i][k] * Lm[j][k];
-      if (i === j) { if (!(s > 0)) return { lam: NaN, err: 'Układ zwichrzeniowy geometrycznie zmienny – brak wystarczających więzów bocznych/skrętnych (podpory widełkowe?).' }; Lm[i][i] = Math.sqrt(s); }
-      else Lm[i][j] = s / Lm[j][j];
+  fixed.forEach(i => { for (let k = 0; k <= HB; k++) { KE.A[i][k] = 0; KG.A[i][k] = 0; if (i - k >= 0) { KE.A[i - k][k] = 0; KG.A[i - k][k] = 0; } } KE.A[i][0] = 1; });
+  try { bandChol(KE); } catch (e) { return { lam: NaN, err: 'Układ zwichrzeniowy geometrycznie zmienny – brak wystarczających więzów bocznych/skrętnych (podpory widełkowe?).' }; }
+  // operator symetryczny A = U^-T·K_G·U^-1 (K_E = U^T U)
+  const A = KE.A;
+  const solveU = (x) => { const y = Float64Array.from(x); for (let i = n - 1; i >= 0; i--) { let s = y[i]; for (let j = i + 1; j <= Math.min(n - 1, i + HB); j++) s -= A[i][j - i] * y[j]; y[i] = s / A[i][0]; } return y; };
+  const solveUT = (x) => { const y = Float64Array.from(x); for (let i = 0; i < n; i++) { let s = y[i]; for (let k = Math.max(0, i - HB); k < i; k++) s -= A[k][i - k] * y[k]; y[i] = s / A[i][0]; } return y; };
+  const op = (x) => solveUT(bandMul(KG, solveU(x)));
+  // Lanczos z pełną reortogonalizacją – skrajne wartości własne
+  const mMax = Math.min(n - fixed.size, 80);
+  const Q = [], al = [], be = [];
+  let q = new Float64Array(n);
+  for (let i = 0; i < n; i++) q[i] = fixed.has(i) ? 0 : Math.sin(0.37 * i + 1) + 0.3 * Math.cos(1.7 * i);
+  let nq = Math.sqrt(q.reduce((s, v) => s + v * v, 0)); for (let i = 0; i < n; i++) q[i] /= nq;
+  let bPrev = 0, qPrev = null, muBest = 0, sBest = null, kBest = 0;
+  for (let k = 0; k < mMax; k++) {
+    Q.push(q);
+    let w = op(q);
+    let a = 0; for (let i = 0; i < n; i++) a += w[i] * q[i];
+    al.push(a);
+    for (let i = 0; i < n; i++) w[i] -= a * q[i] + (qPrev ? bPrev * qPrev[i] : 0);
+    for (let r = 0; r < 2; r++) for (const v of Q) { let d = 0; for (let i = 0; i < n; i++) d += w[i] * v[i]; for (let i = 0; i < n; i++) w[i] -= d * v[i]; }
+    const b = Math.sqrt(w.reduce((s, v) => s + v * v, 0));
+    // wartości Ritza
+    if (k >= 4 && (k % 4 === 0 || b < 1e-12 || k === mMax - 1)) {
+      const m2 = al.length, Tm = [];
+      for (let i = 0; i < m2; i++) { const row = new Float64Array(m2); row[i] = al[i]; if (i > 0) row[i - 1] = be[i - 1]; if (i < m2 - 1) row[i + 1] = be[i]; Tm.push(row); }
+      const { d, V } = eigSym(Tm);
+      let kk = -1, mu = 0; for (let j = 0; j < m2; j++) if (d[j] > mu) { mu = d[j]; kk = j; }
+      if (kk >= 0) {
+        const s = new Float64Array(m2); for (let j = 0; j < m2; j++) s[j] = V[j][kk];
+        const res = Math.abs(b * s[m2 - 1]);
+        const conv = Math.abs(mu - muBest) <= 1e-9 * Math.abs(mu) && res <= 1e-6 * Math.abs(mu);
+        muBest = mu; sBest = s; kBest = m2;
+        if (conv) break;
+      }
     }
+    if (b < 1e-12) break;
+    be.push(b); qPrev = q; bPrev = b;
+    q = new Float64Array(n); for (let i = 0; i < n; i++) q[i] = w[i] / b;
   }
-  // C = L^-1 B L^-T
-  const Y = B.map(r => Float64Array.from(r));
-  for (let c = 0; c < nf; c++) { for (let i = 0; i < nf; i++) { let s = Y[i][c]; for (let k = 0; k < i; k++) s -= Lm[i][k] * Y[k][c]; Y[i][c] = s / Lm[i][i]; } }
-  const C = new Array(nf);
-  for (let i = 0; i < nf; i++) C[i] = new Float64Array(nf);
-  for (let r = 0; r < nf; r++) { for (let i = 0; i < nf; i++) { let s = Y[r][i]; for (let k = 0; k < i; k++) s -= Lm[i][k] * C[r][k]; C[r][i] = s / Lm[i][i]; } }
-  for (let i = 0; i < nf; i++) for (let j = 0; j < i; j++) { const v = 0.5 * (C[i][j] + C[j][i]); C[i][j] = v; C[j][i] = v; }
-  const { d, V } = eigSym(C);
-  let kmax = -1, mu = 0;
-  for (let k = 0; k < nf; k++) if (d[k] > mu) { mu = d[k]; kmax = k; }
-  if (kmax < 0 || mu <= 1e-14) return { lam: Infinity, mode: null };
-  // wektor: x = L^-T y
-  const y = new Float64Array(nf); for (let i = 0; i < nf; i++) y[i] = V[i][kmax];
-  for (let i = nf - 1; i >= 0; i--) { let s = y[i]; for (let k = i + 1; k < nf; k++) s -= Lm[k][i] * y[k]; y[i] = s / Lm[i][i]; }
-  const full = new Float64Array(n); free.forEach((g, i) => { full[g] = y[i]; });
+  if (!(muBest > 1e-14) || !sBest) return { lam: Infinity, mode: null };
+  const y = new Float64Array(n); for (let j = 0; j < kBest; j++) { const c = sBest[j]; const v = Q[j]; for (let i = 0; i < n; i++) y[i] += c * v[i]; }
+  const full = solveU(y); fixed.forEach(i => { full[i] = 0; });
   const u = [], phi = [];
   for (let i = 0; i < nn; i++) { u.push(full[4 * i]); phi.push(full[4 * i + 2]); }
-  return { lam: 1 / mu, mode: { xs: xs.slice(), u, phi } };
+  return { lam: 1 / muBest, mode: { xs: xs.slice(), u, phi } };
 };
 
 /* ------------------------------------------------------- drgania własne (płaszczyzna pionowa) */

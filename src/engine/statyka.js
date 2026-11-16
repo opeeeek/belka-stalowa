@@ -219,11 +219,15 @@ S.analyze = function (md, sec) {
 
 /* wartości w punkcie x (interpolacja liniowa po próbkach; przy nieciągłości – większa |wartość|) */
 S.at = function (xs, arr, x) {
-  let best = null;
-  for (let i = 0; i < xs.length; i++) if (Math.abs(xs[i] - x) < 1e-6) { if (best === null || Math.abs(arr[i]) > Math.abs(best)) best = arr[i]; }
-  if (best !== null) return best;
-  for (let i = 1; i < xs.length; i++) if (xs[i] >= x) { const t = (x - xs[i - 1]) / (xs[i] - xs[i - 1] || 1); return arr[i - 1] + t * (arr[i] - arr[i - 1]); }
-  return arr[arr.length - 1];
+  // wyszukiwanie binarne pierwszego indeksu z xs[i] ≥ x − ε
+  let lo = 0, hi = xs.length - 1;
+  if (x <= xs[0]) return arr[0];
+  if (x >= xs[hi]) { let b = arr[hi]; for (let i = hi; i >= 0 && Math.abs(xs[i] - x) < 1e-6; i--) if (Math.abs(arr[i]) > Math.abs(b)) b = arr[i]; return b; }
+  while (lo < hi) { const m = (lo + hi) >> 1; if (xs[m] < x - 1e-6) lo = m + 1; else hi = m; }
+  if (lo === 0) return arr[0];
+  if (Math.abs(xs[lo] - x) < 1e-6) { let b = arr[lo]; for (let i = lo + 1; i < xs.length && Math.abs(xs[i] - x) < 1e-6; i++) if (Math.abs(arr[i]) > Math.abs(b)) b = arr[i]; return b; }
+  const i = lo, t = (x - xs[i - 1]) / (xs[i] - xs[i - 1] || 1);
+  return arr[i - 1] + t * (arr[i] - arr[i - 1]);
 };
 
 })(typeof globalThis !== 'undefined' ? globalThis : this);

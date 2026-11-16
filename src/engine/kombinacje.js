@@ -96,7 +96,7 @@ K.generate = function (md, an, ndp, opt) {
         const psi = (k) => K.psi(R[k].c);
         // ---- SGN (STR)
         [gS, gI].forEach(gf => {
-          if (!ch.length) { push(mk('SGN', gf, null, [], [], 0, pat, '6.10')); return; }
+          if (!ch.length) { push(mk('SGN', gf, null, [], [], 0, pat, ndp.komb === '6.10' ? '6.10' : '6.10a')); return; }
           if (ndp.komb === '6.10') {
             ch.forEach(L => { const acc = ch.filter(k => k !== L); push(mk('SGN', gf, L, acc, acc.map(k => gQ * psi(k)[0]), gQ, pat, '6.10')); });
           } else {

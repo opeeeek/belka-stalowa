@@ -192,57 +192,60 @@ R.MNpl = function (sec, fy, Nc, Mpos, g0) {
 };
 
 /* ---------------------------------------------------------- sprawdzenie przekroju w punkcie */
-// e: { M, V, N(+rozciąganie), Mz, Vy } [Nmm, N]; zwraca wytężenia składowe
-R.atPoint = function (sec, b, ndp, e) {
+// kontekst kombinacji: klasa i nośności zależne od N (stałej w kombinacji) i znaku M
+R.ctx = function (sec, b, ndp, Nc, Mpos, Mneg) {
   const fy = b.fy, g0 = ndp.gM0;
-  const M = e.M, V = Math.abs(e.V), Nc = -(e.N || 0), Mz = Math.abs(e.Mz || 0), Vy = Math.abs(e.Vy || 0);
-  const Mpos = M >= 0;
-  const out = { M, V, Nc, Mz };
-  // klasa dla danej kombinacji (wpływ N na środnik)
-  const k = Math.abs(Nc) < 1e-3 * b.Npl ? (Mpos ? b.kPos : b.kNeg) : R.classAt(sec, fy, M, Nc);
-  out.cls = k.cls;
-  // ścinanie
-  out.uV = V / b.Vpl;
-  out.uVy = Vy / b.Vplz_y;
-  // redukcja na ścinanie (6.2.8)
+  const small = Math.abs(Nc) < 1e-3 * b.Npl;
+  const one = (sign, Mref) => {
+    const k = small ? (sign > 0 ? b.kPos : b.kNeg) : R.classAt(sec, fy, sign * Math.max(Math.abs(Mref), 1e3), Nc);
+    let Wy, eff = null;
+    if (k.cls <= 2) Wy = sec.Wpl_y; else if (k.cls === 3) Wy = Math.min(sec.Wel_t, sec.Wel_b);
+    else { eff = sign > 0 ? (b.effPos || R.effective(sec, fy, 'Mpos')) : (b.effNeg || R.effective(sec, fy, 'Mneg')); Wy = eff.Weff; }
+    let MN = null, negl = true;
+    if (k.cls <= 2) {
+      negl = Math.abs(Nc) <= 0.25 * b.Npl && Math.abs(Nc) <= 0.5 * sec.hw * sec.tw * fy / g0; // 6.2.9.1(4)
+      MN = negl ? Wy * fy / g0 : Math.min(Wy * fy / g0, R.MNpl(sec, fy, Nc, sign > 0, g0));
+    }
+    return { k, cls: k.cls, Wy, eff, MN, negl };
+  };
+  const o = { Nc, pos: one(1, Mpos), neg: one(-1, Mneg) };
+  if (Nc > 0 && Math.max(o.pos.cls, o.neg.cls) === 4) o.effN = b.effN || R.effective(sec, fy, 'N');
+  return o;
+};
+// e: { M, V, Mz, Vy } [Nmm, N]; ctx – z R.ctx; zwraca wytężenia składowe
+R.atPoint = function (sec, b, ndp, e, ctx) {
+  const fy = b.fy, g0 = ndp.gM0, Nc = ctx.Nc;
+  const M = e.M, V = Math.abs(e.V), Mz = Math.abs(e.Mz || 0), Vy = Math.abs(e.Vy || 0);
+  const c = M >= 0 ? ctx.pos : ctx.neg;
+  const out = { cls: c.cls };
+  out.uV = V / b.Vpl; out.uVy = Vy / b.Vplz_y;
   const rho = V > 0.5 * b.Vpl ? Math.pow(2 * V / b.Vpl - 1, 2) : 0;
   out.rho = rho;
-  let Wy;
-  if (k.cls <= 2) Wy = sec.Wpl_y; else if (k.cls === 3) Wy = Math.min(sec.Wel_t, sec.Wel_b);
-  else Wy = (Mpos ? (b.effPos || R.effective(sec, fy, 'Mpos')) : (b.effNeg || R.effective(sec, fy, 'Mneg'))).Weff;
-  let McRd = Wy * fy / g0;
+  let McRd = c.Wy * fy / g0, red = 1;
   if (rho > 0) {
-    if (k.cls <= 2) { const Aw = sec.hw * sec.tw; McRd = Math.min(McRd, (sec.Wpl_y - rho * Aw * Aw / (4 * sec.tw)) * fy / g0); }
-    else { // zredukowana granica plastyczności w polu ścinanym ≡ zredukowana grubość środnika
+    if (c.cls <= 2) { const Aw = sec.hw * sec.tw; const Mv = (sec.Wpl_y - rho * Aw * Aw / (4 * sec.tw)) * fy / g0; red = Math.min(1, Mv / McRd); }
+    else {
       const s2 = Object.assign({}, sec, { tw: (1 - rho) * sec.tw, r: 0 });
       const rp = P.rectProps(P.rects(s2).filter(r => r.id !== 'r'));
-      McRd = Math.min(McRd, Math.min(rp.Wt, rp.Wb) * fy / g0);
+      red = Math.min(1, Math.min(rp.Wt, rp.Wb) / Math.min(sec.Wel_t, sec.Wel_b));
     }
+    McRd *= red;
   }
   out.McRd = McRd;
-  // M + N (+ Mz)
-  const n = Nc / b.Npl;
-  if (k.cls <= 2) {
-    const fyr = fy; // redukcja ρ uwzględniona w McRd
-    let MN = McRd;
-    const negl = Math.abs(Nc) <= 0.25 * b.Npl && Math.abs(Nc) <= 0.5 * sec.hw * sec.tw * fy / g0; // 6.2.9.1(4)
-    if (!negl) MN = Math.min(McRd, R.MNpl(sec, fyr, Nc, Mpos, g0) * (McRd / (sec.Wpl_y * fy / g0)));
-    out.MN = MN;
+  const n = Math.abs(Nc) / b.Npl;
+  if (c.cls <= 2) {
+    const MN = c.MN * red;
     const a = Math.min(0.5, (sec.A - (sec.bg * sec.tg + sec.bd * sec.td)) / sec.A);
-    const nn = Math.abs(n);
-    const MNz = nn <= a ? b.Mplz : b.Mplz * (1 - Math.pow((nn - a) / (1 - a), 2));
-    out.MNz = MNz;
-    if (Mz > 0) { const be = Math.max(1, 5 * nn); out.uMN = Math.pow(Math.abs(M) / MN, 2) + Math.pow(Mz / MNz, be); out.uMNform = '6.41'; }
-    else { out.uMN = Math.abs(M) / MN; out.uMNform = negl ? '6.2.5' : '6.31/6.36'; }
-    out.uM = Math.abs(M) / McRd;
+    const MNz = n <= a ? b.Mplz : b.Mplz * (1 - Math.pow((n - a) / (1 - a), 2));
+    out.MN = MN; out.MNz = MNz;
+    if (Mz > 0) { const be = Math.max(1, 5 * n); out.uMN = Math.pow(Math.abs(M) / MN, 2) + Math.pow(Mz / MNz, be); out.f = '6.41'; }
+    else { out.uMN = Math.abs(M) / MN; out.f = c.negl ? '6.12' : '6.31'; }
   } else {
-    // sprężyście / przekrój efektywny (6.2.9.2, 6.2.9.3)
-    let Aeff = sec.A, eN = 0, Weff = Wy;
-    if (k.cls === 4 && Nc > 0) { const ef = b.effN || R.effective(sec, fy, 'N'); Aeff = ef.A; eN = ef.eN; }
-    const sx = Nc / Aeff + (Math.abs(M) + Math.abs(Nc * eN)) / (McRd * g0 / fy) + Mz / sec.Wel_z;
-    out.uMN = Math.max(sx, Math.abs(Nc) / Aeff) / (fy / g0);
-    out.uM = Math.abs(M) / McRd;
-    out.uMNform = k.cls === 3 ? '6.42' : '6.44';
+    let Aeff = sec.A, eN = 0;
+    if (c.cls === 4 && Nc > 0 && ctx.effN) { Aeff = ctx.effN.A; eN = ctx.effN.eN; }
+    const sx = Math.abs(Nc) / Aeff + (Math.abs(M) + Math.abs(Nc * eN)) / (c.Wy * red) + Mz / sec.Wel_z;
+    out.uMN = sx / (fy / g0);
+    out.f = c.cls === 3 ? '6.42' : '6.44';
   }
   out.uN = Math.abs(Nc) / (Nc > 0 ? b.Nc : b.Npl);
   out.u = Math.max(out.uMN, out.uV, out.uVy, out.uN);
