@@ -16,7 +16,7 @@ J.defaultState = function () {
     normy: N.defaultProfile(),
     geom: { przesla: [6.0], wspL: 0, wspP: 0 },
     podpory: [
-      { typ: 'przegub', ltb: 'widelkowe', ss: 0, c: 0, wezel: { typ: 'blacha_czolowa', hp: 200, bp: 150, tp: 10, nr: 2, d: 'M16', kl: '8.8', e1: 40, p1: 120, e2: 30, p3: 90, a: 4, tsup: 12, fusup: 510, gwint: true } },
+      { typ: 'przegub', ltb: 'widelkowe', ss: 0, c: 0, wezel: { typ: 'blacha_czolowa', hp: 200, bp: 150, tp: 8, nr: 2, d: 'M16', kl: '8.8', e1: 40, p1: 120, e2: 30, p3: 90, a: 4, tsup: 12, fusup: 510, gwint: true } },
       { typ: 'przegub', ltb: 'widelkowe', ss: 150, c: 50, wezel: { typ: 'oparcie', podloze: 'beton', bp: 200, lp: 150, tp: 15, beton: 'C25/30', alfa: 1.5, lb: 150, zebro: false, bs: 70, ts: 10, ch: 15 } }
     ],
     podporyTymczasowe: [],
