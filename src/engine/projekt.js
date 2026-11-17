@@ -6,7 +6,7 @@
    ===================================================================== */
 (function (root) {
 'use strict';
-const BS = root.BS, U = BS.U, N = BS.N, M = BS.M, P = BS.P, S = BS.S, K = BS.K, R = BS.R, T = BS.T, C = BS.C, X = BS.X, F = BS.FE;
+const BS = root.BS, U = BS.U, N = BS.N, M = BS.M, P = BS.P, S = BS.S, K = BS.K, R = BS.R, T = BS.T, C = BS.C, X = BS.X, F = BS.FE, W = BS.W;
 const J = BS.J = {};
 
 J.defaultState = function () {
@@ -16,7 +16,7 @@ J.defaultState = function () {
     normy: N.defaultProfile(),
     geom: { przesla: [6.0], wspL: 0, wspP: 0 },
     podpory: [
-      { typ: 'przegub', ltb: 'widelkowe', ss: 0, c: 0, wezel: { typ: 'blacha_czolowa', hp: 200, bp: 150, tp: 8, nr: 2, d: 'M16', kl: '8.8', e1: 40, p1: 120, e2: 30, p3: 90, a: 4, tsup: 12, fusup: 510, gwint: true } },
+      { typ: 'przegub', ltb: 'widelkowe', ss: 0, c: 0, wezel: { typ: 'blacha_czolowa', hp: 200, bp: 150, tp: 10, nr: 2, d: 'M20', kl: '8.8', e1: 40, p1: 120, e2: 30, p3: 90, a: 5, gatP: 'S235', sup: 'pas_slupa', tsup: 12, supGat: 'S355', gwint: true, otw: 'normalne', Nt: 0 } },
       { typ: 'przegub', ltb: 'widelkowe', ss: 150, c: 50, wezel: { typ: 'oparcie', podloze: 'beton', bp: 200, lp: 150, tp: 15, beton: 'C25/30', alfa: 1.5, lb: 150, zebro: false, bs: 70, ts: 10, ch: 15 } }
     ],
     podporyTymczasowe: [],
@@ -57,7 +57,7 @@ J.normalize = function (st) {
   const nS = (o.geom.przesla || []).length + 1;
   o.podpory = (o.podpory || []).slice(0, nS);
   while (o.podpory.length < nS) o.podpory.push({ typ: 'przegub', ltb: 'widelkowe', ss: 100, c: 0, wezel: { typ: 'brak' } });
-  ['obciazenia', 'etapy', 'stezenia', 'podporyTymczasowe'].forEach(k => { if (!Array.isArray(o[k])) o[k] = []; });
+  ['obciazenia', 'etapy', 'stezenia', 'podporyTymczasowe', 'styki'].forEach(k => { if (!Array.isArray(o[k])) o[k] = []; });
   if (!o.etapy.length) o.etapy = [{ id: 'E1', nazwa: 'Eksploatacja', typ: 'eksploatacja', opis: '' }];
   o.format = BS.FORMAT;
   return o;
@@ -229,6 +229,7 @@ J.run = function (st0, opt) {
   out.sgu.checks.forEach(c => out.checks.push(c));
   // --- podpory, połączenia, EQU
   out.podpory = J.supports(st, md, an, combos, sec, base, mat, ndp, env, out);
+  try { out.styki = J.spliceRun(st, sec, mat, ndp, base, md, env, an, out); } catch (e) { err('Styki: ' + e.message); }
   // --- pożar
   if (st.pozar.aktywny) {
     try { out.pozar = J.fire(st, md, an, combos, sec, base, ndp); out.pozar.checks.forEach(c => out.checks.push(c)); } catch (e) { err('Pożar: ' + e.message); }
@@ -357,13 +358,13 @@ J.supports = function (st, md, an, combos, sec, base, mat, ndp, env, out) {
     const grp = `Podpory i połączenia – podpora ${p.id}`;
     const Rmin = Math.min(...q.map(z => z.Rmin));
     if (Rmin < 0) {
-      const anch = p.wezel && ['blacha_czolowa', 'blacha_zebrowa'].includes(p.wezel.typ);
+      const anch = p.wezel && ['blacha_czolowa', 'blacha_zebrowa', 'katowniki', 'spawane'].includes(p.wezel.typ);
       r.checks.push(BS.check({ id: `${p.id}-EQU`, grp, n: 'Odrywanie podpory (EQU) – wymagane zakotwienie', ref: 'PN-EN 1990 6.4.3.1, tabl. A1.2(A)', Ed: -Rmin, Rd: null, unit: 'F', util: null, forceStatus: anch ? 'warn' : 'fail', info: false, x: p.x, combo: 'EQU: 1,10/0,90·G + 1,5·Q', note: anch ? 'Siłę odrywającą musi przenieść połączenie (sprawdź śruby na rozciąganie).' : 'Oparcie bez zakotwienia – zaprojektuj kotwienie na siłę odrywającą.' }));
     }
     const isEnd = !p.tymcz && ((p.idx === 0 && md.wL === 0) || (p.idx === md.sup.length - 1 && md.wP === 0));
     const w = p.wezel || { typ: 'brak' };
-    let conn = ['blacha_czolowa', 'blacha_zebrowa'].includes(w.typ);
-    if (conn && !(sec.kind === 'I' || sec.kind === 'U')) { out.errors.push(`Podpora ${p.id}: połączenie śrubowe przez środnik (blacha czołowa/żebrowa) jest obsługiwane dla dwuteowników i ceowników – dla ${sec.kind === 'RHS' ? 'rur' : 'kątowników'} wybierz oparcie.`); conn = false; }
+    let conn = ['blacha_czolowa', 'blacha_zebrowa', 'katowniki', 'spawane'].includes(w.typ);
+    if (conn && w.typ !== 'spawane' && !(sec.kind === 'I' || sec.kind === 'U')) { out.errors.push(`Podpora ${p.id}: połączenie śrubowe przez środnik (blacha czołowa / żebrowa / kątowniki) jest obsługiwane dla dwuteowników i ceowników – dla ${sec.kind === 'RHS' ? 'rur' : 'kątowników'} wybierz połączenie spawane lub oparcie.`); conn = false; }
     // docisk środnika / żebro
     if (!conn && Rmax > 0 && sec.kind !== 'L') {
       if (w.zebro && (sec.kind === 'I' || sec.kind === 'U')) {
@@ -389,16 +390,8 @@ J.supports = function (st, md, an, combos, sec, base, mat, ndp, env, out) {
       bp.uwagi.forEach(u => out.warnings.push(`Podpora ${p.id}: ${u}`));
     }
     if (conn && Rmax > 0) {
-      const wv = Object.assign({}, w);
-      ['hp', 'bp', 'tp', 'nr', 'n', 'e1', 'p1', 'e2', 'p3', 'a', 'tsup', 'fusup', 'z', 'e2b'].forEach(k => { if (wv[k] !== undefined) wv[k] = U.num(wv[k]); });
-      let cr;
-      try { cr = w.typ === 'blacha_czolowa' ? C.endPlate(sec, mat, ndp, wv, Rmax) : C.finPlate(sec, mat, ndp, wv, Rmax); } catch (e) { out.errors.push(`Połączenie ${p.id}: ${e.message}`); cr = null; }
-      if (cr) {
-        r.pol = cr;
-        cr.checks.forEach((c, k) => r.checks.push(BS.check({ id: `${p.id}-C${k}`, grp, n: c.n, ref: c.ref, Ed: c.Ed, Rd: c.Rd, unit: c.Rd === 1 ? '-' : (c.n.indexOf('V·z') >= 0 && c.n.indexOf('Spoiny') < 0 ? 'M' : c.n.indexOf('Spoiny blachy do podpory') >= 0 ? 'q' : 'F'), util: c.u, x: p.x, combo: cMax !== null ? combos[cMax].opis : '', d: c, f: c.f })));
-        cr.detal.filter(d => !d.ok).forEach(d => r.checks.push(BS.check({ id: `${p.id}-D${d.n}`, grp, n: `Rozmieszczenie łączników: ${d.n}`, ref: 'PN-EN 1993-1-8 tabl. 3.3', Ed: d.v, Rd: d.lim, unit: 'mm', util: d.lim / Math.max(d.v, 1e-9), inverse: true })));
-        cr.uwagi.forEach(u => out.warnings.push(`Połączenie ${p.id}: ${u}`));
-      }
+      const res2 = J.jointRun(st, sec, mat, ndp, base, p, w, { Rmax, Mmax, Rk: r.Rk, typ: p.typ }, grp, cMax !== null ? combos[cMax].opis : '', out);
+      if (res2) { r.pol = res2.o; r.F = res2.F; res2.checks.forEach(c => r.checks.push(c)); }
     }
     r.checks.forEach(c => out.checks.push(c));
     res.push(r);
@@ -406,6 +399,47 @@ J.supports = function (st, md, an, combos, sec, base, mat, ndp, env, out) {
   return res;
 };
 
+
+/* ---------------------------------------------------------- połączenia (BS.W) – siły, sprawdzenia, rejestr */
+J.jointForces = function (w, info) {
+  const Vser = (info.Rk || []).reduce((s2, q) => s2 + Math.max(0, q.R), 0);
+  if (w.silyRecz) return { V: Math.abs(U.num(w.VEd)) * 1e3, Nt: Math.max(0, U.num(w.Nt)) * 1e3, N: U.num(w.NEd) * 1e3, M: Math.abs(U.num(w.MEd)) * 1e6, Vser: Vser || Math.abs(U.num(w.VEd)) * 1e3 / 1.4, recz: true };
+  return { V: info.Rmax, Nt: Math.max(0, U.num(w.Nt)) * 1e3, N: 0, M: w.typ === 'spawane' && info.typ === 'utwierdzenie' ? info.Mmax : 0, Vser };
+};
+J.jointCtx = (sec, mat, ndp, base) => ({ sec, mat, ndp: Object.assign({ gM3: 1.25, gM3ser: 1.1 }, ndp), base });
+const UNIT = { F: 'F', M: 'M', '-': '-', MPa: 'MPa', mm: 'mm' };
+J.jointChecks = function (o, idp, grp, x, combo) {
+  const out = [];
+  o.checks.forEach((c, k) => out.push(BS.check({ id: `${idp}-C${k}`, grp, n: `${c.grp}: ${c.n}`, ref: c.ref, Ed: c.Ed, Rd: c.Rd, unit: UNIT[c.unit] || 'F', util: c.u, x, combo, d: c, f: c.f })));
+  o.detalFail.forEach((d, k) => out.push(BS.check({ id: `${idp}-D${k}`, grp, n: `Konstrukcja – ${d.el}: ${d.n}`, ref: 'PN-EN 1993-1-8 tabl. 3.3', Ed: d.v, Rd: d.lim, unit: 'mm', util: d.rel === '≥' ? d.lim / Math.max(d.v, 1e-9) : d.v / Math.max(d.lim, 1e-9), inverse: d.rel === '≥', d })));
+  o.zalFail.forEach((d, k) => out.push(BS.check({ id: `${idp}-Z${k}`, grp, n: `Zalecenie – ${d.el}: ${d.n}`, ref: 'SCI P358 / dobra praktyka', Ed: d.v, Rd: d.lim, unit: 'mm', util: null, forceStatus: 'warn', inverse: d.rel === '≥', d, note: 'Zalecenie konstrukcyjne (ciągliwość, montaż, trwałość) – nie jest warunkiem nośności.' })));
+  return out;
+};
+J.jointRun = function (st, sec, mat, ndp, base, p, w, info, grp, combo, out) {
+  const F = J.jointForces(w, info);
+  let o;
+  try { o = W.design(J.jointCtx(sec, mat, ndp, base), w, F); } catch (e) { out.errors.push(`Połączenie ${p.id}: ${e.message}`); return null; }
+  if (!o) return null;
+  o.uwagi.forEach(u => out.warnings.push(`Połączenie ${p.id}: ${u}`));
+  return { o, F, checks: J.jointChecks(o, p.id, grp, p.x, F.recz ? 'siły zadane ręcznie' : combo) };
+};
+J.spliceForces = function (s, md, env, an) {
+  if (s.silyRecz) return { M: Math.abs(U.num(s.MEd)) * 1e6, V: Math.abs(U.num(s.VEd)) * 1e3, N: U.num(s.NEd) * 1e3, recz: true };
+  const x = U.clamp(U.num(s.x) * 1000, 0, md.L), xs = an.xs; let k = 0; for (let i = 0; i < xs.length; i++) if (Math.abs(xs[i] - x) < Math.abs(xs[k] - x)) k = i;
+  let Mx = 0, Vx = 0, Nx = 0;
+  env.forEach(e => { Mx = Math.max(Mx, Math.abs(e.Mmax[k]), Math.abs(e.Mmin[k])); Vx = Math.max(Vx, Math.abs(e.Vmax[k]), Math.abs(e.Vmin[k])); if (isFinite(e.Nmax)) Nx = Math.max(Nx, Math.abs(e.Nmax), Math.abs(e.Nmin)); });
+  return { M: Mx, V: Vx, N: Nx, x };
+};
+J.spliceRun = function (st, sec, mat, ndp, base, md, env, an, out) {
+  return (st.styki || []).map((s, j) => {
+    const F = J.spliceForces(s, md, env, an), id = 'S' + (j + 1), grp = `Styki – styk ${id} (x = ${U.fmt(U.num(s.x), 2)} m)`;
+    let o;
+    try { o = W.designSplice(J.jointCtx(sec, mat, ndp, base), s, F); } catch (e) { out.errors.push(`Styk ${id}: ${e.message}`); return { id, F, o: null }; }
+    o.uwagi.forEach(u => out.warnings.push(`Styk ${id}: ${u}`));
+    J.jointChecks(o, id, grp, U.num(s.x) * 1000, F.recz ? 'siły zadane ręcznie' : 'obwiednia |M|, |V|, |N| w miejscu styku (wszystkie etapy)').forEach(c => out.checks.push(c));
+    return { id, F, o, x: U.num(s.x) * 1000 };
+  });
+};
 /* ---------------------------------------------------------- pożar */
 J.fire = function (st, md, an, combos, sec, base, ndp) {
   const s = md.nE - 1, xs = an.xs;
@@ -551,7 +585,7 @@ J.applyScheme = function (st, id) {
 
 /* ---------------------------------------------------------- dobór */
 // grupy sprawdzeń pomijane w doborze przekroju (połączenia/oparcia dobiera „Dobierz węzły”; pożar – zabezpieczenie; kruche pękanie – gatunek)
-const MEMBER = (c) => !/^Podpory|^Pożar|^Kruche|^Zmęczenie/.test(c.grp);
+const MEMBER = (c) => !/^Podpory|^Styki|^Pożar|^Kruche|^Zmęczenie/.test(c.grp);
 J.passesFor = function (r, eta, filt) {
   if (r.errors.length) return false;
   return r.checks.filter(c => !c.info && (!filt || filt(c))).every(c => c.status !== 'fail' && (c.util === null || !isFinite(c.util) ? c.status !== 'fail' : c.util <= eta + 1e-9));
@@ -588,35 +622,11 @@ J.dobierzWezly = function (st0, r, eta) {
     const w = sp.wezel || (sp.wezel = { typ: 'brak' });
     const R0 = p.Rmax; if (!(R0 > 0)) return;
     const okU = (o) => o.checks.every(c => c.u <= eta + 1e-9) && (!o.detal || o.detal.every(d => d.ok));
-    if (w.typ === 'blacha_czolowa' && (sec.kind === 'I' || sec.kind === 'U')) {
-      // przegląd wariantów – najmniejszy „koszt” (śruby, blacha, spoiny) przy spełnionych warunkach; kara za tp > d/2 (zdolność do obrotu przegubu)
-      let found = null, best = Infinity;
-      for (const d of ['M12', 'M16', 'M20', 'M24']) { const b0 = M.SRUBY[d]; for (let nr = 1; nr <= 8; nr++) for (const tp of [8, 10, 12, 15]) for (const a of [3, 4, 5, 6, 7, 8]) {
-        const e1 = Math.ceil(1.5 * b0.d0 / 5) * 5, p1 = Math.ceil(Math.max(2.2 * b0.d0, 3 * b0.d) / 5) * 5, e2 = Math.ceil(1.5 * b0.d0 / 5) * 5;
-        const p3 = Math.ceil(Math.max(2.4 * b0.d0, sec.tw + 2 * a + 2 * b0.d) / 10) * 10, hp = Math.max(Math.ceil(0.6 * sec.hw / 10) * 10, 2 * e1 + (nr - 1) * p1);
-        if (hp > sec.hw - 10) continue;
-        const wv = Object.assign({}, w, { hp, bp: p3 + 2 * e2, tp, nr, d, kl: w.kl || '8.8', e1, p1, e2, p3, a, tsup: U.num(w.tsup, 12), fusup: U.num(w.fusup, 360), gwint: w.gwint !== false });
-        let o; try { o = C.endPlate(sec, mat, ndp, wv, R0); } catch (e) { continue; }
-        if (!okU(o)) continue;
-        const cost = 2 * nr * b0.d * b0.d * 0.6 + hp * wv.bp * tp * 0.0008 + 2 * hp * a * a * 0.05 + (tp > b0.d / 2 ? 1e4 : 0);
-        if (cost < best) { best = cost; found = wv; }
-      } }
-      if (found) { Object.assign(w, found); log.push(`Podpora ${p.id}: blacha czołowa ${found.hp}×${found.bp}×${found.tp} mm, śruby 2×${found.nr} ${found.d} kl. ${found.kl}, spoiny a = ${found.a} mm.`); }
-      else { allOk = false; log.push(`Podpora ${p.id}: nie znaleziono krótkiej blachy czołowej spełniającej warunki – rozważ blachę żebrową lub oparcie.`); }
-    } else if (w.typ === 'blacha_zebrowa' && (sec.kind === 'I' || sec.kind === 'U')) {
-      let found = null, best = Infinity;
-      for (const d of ['M16', 'M20', 'M24']) { const b0 = M.SRUBY[d]; for (let n = 2; n <= 8; n++) for (const tp of [8, 10, 12, 15]) for (const a of [4, 5, 6, 7, 8, 10]) {
-        const e1 = Math.ceil(1.5 * b0.d0 / 5) * 5, p1 = Math.ceil(Math.max(2.2 * b0.d0, 3 * b0.d) / 5) * 5, e2 = Math.ceil(1.5 * b0.d0 / 5) * 5;
-        const hp = 2 * e1 + (n - 1) * p1; if (hp > sec.hw - 10) continue;
-        const wv = Object.assign({}, w, { hp, tp, n, d, kl: w.kl || '8.8', e1, p1, e2, z: U.num(w.z, 60), e2b: Math.max(U.num(w.e2b, 40), e2), a, gwint: w.gwint !== false });
-        let o; try { o = C.finPlate(sec, mat, ndp, wv, R0); } catch (e) { continue; }
-        if (!okU(o)) continue;
-        const aMin = (mat.fy >= 355 ? 0.6 : 0.5) * tp;
-        const cost = n * b0.d * b0.d * 0.6 + hp * (wv.z + e2) * tp * 0.0008 + 2 * hp * a * a * 0.05 + (tp > b0.d / 2 ? 1e4 : 0) + (a < aMin ? 1e4 : 0) + (hp < 0.6 * sec.hw ? 2e3 : 0);
-        if (cost < best) { best = cost; found = wv; }
-      } }
-      if (found) { Object.assign(w, found); log.push(`Podpora ${p.id}: blacha żebrowa ${found.hp}×${found.tp} mm, ${found.n} × ${found.d} kl. ${found.kl}, spoiny a = ${found.a} mm.`); }
-      else { allOk = false; log.push(`Podpora ${p.id}: nie znaleziono blachy żebrowej spełniającej warunki.`); }
+    if (['blacha_czolowa', 'blacha_zebrowa', 'katowniki', 'spawane'].includes(w.typ) && (w.typ === 'spawane' || sec.kind === 'I' || sec.kind === 'U')) {
+      const F = J.jointForces(w, { Rmax: R0, Mmax: p.Mmax, Rk: p.Rk, typ: sp.typ });
+      const d = W.auto(J.jointCtx(sec, mat, ndp, base), Object.assign({}, W.defaults(w.typ, sec), w), F, eta);
+      if (d.ok) { Object.keys(d.w).forEach(k => { w[k] = d.w[k]; }); log.push(`Podpora ${p.id}: ${J.jointTxt(w, sec)} – wytężenie ${Math.round(d.o.u * 100)}%.`); }
+      else { allOk = false; log.push(`Podpora ${p.id}: nie znaleziono wariantu „${W.TYPY[w.typ]}” spełniającego warunki – zmień rodzaj połączenia lub klasę śrub.`); }
     } else if (sec.kind !== 'L') {
       // oparcie – płyta podporowa i ewentualne żebra
       if (w.typ === 'oparcie' && w.podloze !== 'stal') {
@@ -642,7 +652,25 @@ J.dobierzWezly = function (st0, r, eta) {
       }
     }
   });
+  // styki montażowe
+  (st.styki || []).forEach((s0, k) => {
+    if (s0.typ === 'spawany' || sec.kind !== 'I') return;
+    const rs = (r.styki || [])[k]; if (!rs) return;
+    const d = W.autoSplice(J.jointCtx(sec, mat, ndp, base), s0, rs.F, eta);
+    if (d.ok) { Object.assign(s0, d.w); log.push(`Styk S${k + 1}: nakładki pasów ${s0.bfo}×${s0.tfo}${s0.tfi > 0 ? ` + 2×${s0.bfi}×${s0.tfi}` : ''} mm (2×${s0.nf} ${s0.d}), nakładki środnika 2×${s0.hpw}×${s0.tpw} mm (${s0.nw}×${s0.ncw} ${s0.d}) – wytężenie ${Math.round(d.o.u * 100)}%.`); }
+    else { allOk = false; log.push(`Styk S${k + 1}: nie znaleziono układu nakładek spełniającego warunki – zastosuj styk spawany lub zmień położenie styku.`); }
+  });
   return { st, log, ok: allOk };
+};
+
+J.jointTxt = function (w, sec) {
+  const u = U.num;
+  if (w.typ === 'blacha_czolowa') return `blacha czołowa ${u(w.hp)}×${u(w.bp)}×${u(w.tp)} mm, śruby 2×${u(w.nr)} ${w.d} kl. ${w.kl}, spoiny a = ${u(w.a)} mm`;
+  if (w.typ === 'blacha_zebrowa') return `blacha żebrowa ${u(w.hp)}×${u(w.tp)} mm, śruby ${u(w.nr || w.n)}${u(w.nc, 1) > 1 ? '×' + u(w.nc) : ''} ${w.d} kl. ${w.kl}, spoiny a = ${u(w.a)} mm`;
+  if (w.typ === 'katowniki') return `kątowniki 2×L${String(w.L).replace(/x/g, '×')} dł. ${u(w.hp)} mm, śruby ${u(w.nr)} ${w.d} kl. ${w.kl} (środnik) + 2×${u(w.nr)} (podpora)`;
+  if (w.typ === 'spawane') return w.spoiny === 'czolowa' ? 'spoina czołowa z pełnym przetopem' : `spoiny pachwinowe ${w.spoiny === 'obwodowe' ? `obwodowe a_w = ${u(w.aw)}, a_f = ${u(w.af)}` : `środnika a = ${u(w.aw)}`} mm`;
+  if (w.typ === 'oparcie') return `płyta podporowa ${u(w.bp)}×${u(w.lp)}×${u(w.tp)} mm`;
+  return 'oparcie na stali';
 };
 /* ---------------------------------------------------------- dobór kształtownika */
 J.SERIE_DOBOR = ['IPE', 'HEA', 'HEB', 'HEM'];

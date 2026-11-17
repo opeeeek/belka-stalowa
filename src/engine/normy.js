@@ -149,6 +149,8 @@ N.NDP1_PL = {
   gM0:      { v: 1.00, d: 'γM0 – nośność przekroju', ref: 'PN-EN 1993-1-1, 6.1(1)', z: 'ZK PL' },
   gM1:      { v: 1.00, d: 'γM1 – stateczność elementu', ref: 'PN-EN 1993-1-1, 6.1(1)', z: 'ZK PL' },
   gM2:      { v: 1.25, d: 'γM2 – nośność przekroju netto, śruby, spoiny', ref: 'PN-EN 1993-1-1, 6.1(1); PN-EN 1993-1-8, 2.2', z: 'ZK PL' },
+  gM3:      { v: 1.25, d: 'γM3 – nośność na poślizg w SGN (kat. C)', ref: 'PN-EN 1993-1-8, 2.2', z: 'ZK PL' },
+  gM3ser:   { v: 1.10, d: 'γM3,ser – nośność na poślizg w SGU (kat. B)', ref: 'PN-EN 1993-1-8, 2.2', z: 'ZK PL' },
   fySrc:    { v: 'tab31', d: 'Źródło fy, fu: tablica 3.1 PN-EN 1993-1-1 (tab31) lub norma wyrobu (wyrob)', ref: 'PN-EN 1993-1-1, 3.2.1(1)', z: 'ZK PL', sp: true },
   lamLT0:   { v: 0.40, d: 'λLT,0 – metoda 6.3.2.3', ref: 'PN-EN 1993-1-1, 6.3.2.3(1)', z: 'ZK PL', sp: true },
   betaLT:   { v: 0.75, d: 'β – metoda 6.3.2.3', ref: 'PN-EN 1993-1-1, 6.3.2.3(1)', z: 'ZK PL', sp: true },

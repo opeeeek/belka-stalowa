@@ -101,6 +101,8 @@ func filterFor(f string) (string, string) {
 		return "Projekt BelkaStal (*.belkastal)\x00*.belkastal\x00Raport BelkaStal z danymi (*.html)\x00*.html;*.htm\x00Dane JSON (*.json)\x00*.json\x00Wszystkie pliki (*.*)\x00*.*\x00\x00", "belkastal"
 	case "html":
 		return "Raport HTML (*.html)\x00*.html\x00Wszystkie pliki (*.*)\x00*.*\x00\x00", "html"
+	case "odt":
+		return "Dokument OpenDocument (*.odt)\x00*.odt\x00Wszystkie pliki (*.*)\x00*.*\x00\x00", "odt"
 	default:
 		return "Wszystkie pliki (*.*)\x00*.*\x00\x00", ""
 	}
@@ -181,6 +183,12 @@ func main() {
 		w.Dispatch(func() { w.Eval(js) })
 	}
 	_ = w.Bind("hostTitle", func(t string) { w.SetTitle(t) })
+	// autozapis stanu projektu (niezależny od pamięci przeglądarki WebView2)
+	autoFile := filepath.Join(dir, "autozapis.json")
+	_ = w.Bind("hostStore", func(data string) { _ = os.WriteFile(autoFile, []byte(data), 0o644) })
+	if b, err := os.ReadFile(autoFile); err == nil && len(b) > 2 && b[0] == '{' {
+		w.Init("window.__AUTOSAVE = " + string(b) + ";")
+	}
 	_ = w.Bind("hostRequest", func(msg string) {
 		var q hostReq
 		if err := json.Unmarshal([]byte(msg), &q); err != nil {

@@ -101,19 +101,29 @@ Dokument opisuje algorytmy silnika `BS-ENG 1.0.0` oraz punkty norm (1. generacja
 - w<sub>3</sub> obejmuje tylko część zmienną kombinacji.
 - Częstotliwość f<sub>1</sub> wyznacza MES z macierzą mas konsystentną i masą G + Σψ<sub>2</sub>Q.
 
-## 8. Podpory i połączenia (`polaczenia.js`)
+## 8. Podpory i połączenia (`polaczenia.js`, `wezly.js`)
 
-- Docisk środnika bez żebra:
-  - podpora skrajna bez wspornika – typ c,
-  - pozostałe podpory – typ a.
-- Płyta podporowa: f<sub>jd</sub> = β<sub>j</sub>·α·f<sub>cd</sub> dla betonu, f<sub>d</sub>·β dla muru. Wysięg c = t<sub>p</sub>√(f<sub>y</sub>/(3f<sub>jd</sub>γ<sub>M0</sub>)). Pole efektywne (b<sub>f</sub> + 2c)(l<sub>b</sub> + 2c) nie może przekroczyć wymiarów płyty.
-- Krótka blacha czołowa i blacha żebrowa – sprawdza się:
-  - ścinanie śrub, docisk i grupę łączników (3.7),
-  - ścinanie blachy brutto i netto oraz rozerwanie blokowe (3.10.2),
-  - zginanie blachy żebrowej V·z,
-  - spoiny metodą uproszczoną (4.5.3.3),
-  - minimalne rozstawy (tabl. 3.3).
-- Zalecenia konstrukcyjne dotyczące ciągliwości (t<sub>p</sub> ≤ d/2, h<sub>p</sub> ≥ 0,6h, spoiny o pełnej nośności) program zgłasza jako uwagi.
+**Oparcia**
+- Docisk środnika bez żebra: podpora skrajna bez wspornika – typ c, pozostałe – typ a (PN-EN 1993-1-5, 6).
+- Płyta podporowa: f<sub>jd</sub> = β<sub>j</sub>·α·f<sub>cd</sub> dla betonu, f<sub>d</sub>·β dla muru; wysięg c = t<sub>p</sub>√(f<sub>y</sub>/(3f<sub>jd</sub>γ<sub>M0</sub>)); pole efektywne ograniczone wymiarami płyty.
+
+**Siły w połączeniu**: V<sub>Ed</sub> = maksymalna reakcja z obwiedni SGN wszystkich etapów; V<sub>ser</sub> – suma dodatnich reakcji charakterystycznych (kat. B); M<sub>Ed</sub> dla połączeń spawanych przy utwierdzeniu; siła wiązania N<sub>t</sub> (sytuacja wyjątkowa, PN-EN 1991-1-7) – podawana przez projektanta i sprawdzana niezależnie od V. Siły można zadać ręcznie. W stykach: |M|, |V|, |N| z obwiedni wszystkich etapów w miejscu styku (bezpiecznie – bez jednoczesności).
+
+**Śruby (tabl. 3.1, 3.4)**: F<sub>v,Rd</sub> = α<sub>v</sub>f<sub>ub</sub>A/γ<sub>M2</sub> (α<sub>v</sub> = 0,6 / 0,5; A = A<sub>s</sub> lub pole trzpienia), F<sub>t,Rd</sub> = 0,9f<sub>ub</sub>A<sub>s</sub>/γ<sub>M2</sub>, B<sub>p,Rd</sub> = 0,6πd<sub>m</sub>t<sub>p</sub>f<sub>u</sub>/γ<sub>M2</sub> (d<sub>m</sub> z rozwartości klucza nakrętki), F<sub>b,Rd</sub> = k<sub>1</sub>α<sub>b</sub>f<sub>u</sub>dt/γ<sub>M2</sub> (śruby skrajne/pośrednie i krawędziowe/wewnętrzne osobno; otwory powiększone ×0,8), F<sub>s,Rd</sub> = k<sub>s</sub>nμF<sub>p,C</sub>/γ<sub>M3</sub> (3.9; γ<sub>M3</sub> = 1,25, γ<sub>M3,ser</sub> = 1,1), β<sub>Lf</sub> (3.8). Nośność grupy wg 3.7(1).
+
+**Grupa mimośrodowa** (blacha żebrowa, kątowniki – ramię na belce, nakładki środnika): rozkład sprężysty F<sub>z</sub> = V/n + M·x/I<sub>p</sub>, F<sub>x</sub> = H/n − M·z/I<sub>p</sub>; dla każdej śruby osobno docisk pionowy i poziomy (odległości od krawędzi zależne od położenia śruby) i interakcja (F<sub>z</sub>/F<sub>b,z</sub>)² + (F<sub>x</sub>/F<sub>b,x</sub>)² ≤ 1.
+
+**Rodzaje połączeń** (w nawiasie najważniejsze sprawdzenia; wg PN-EN 1993-1-8 i procedur SCI P358):
+- blacha czołowa krótka / pełna (ścinanie śrub 0,8·n·F<sub>v,Rd</sub>, docisk do blachy i podpory, blacha brutto ze współczynnikiem 1,27 / netto / rozerwanie blokowe, środnik belki, spoiny środnik–blacha; przy wiązaniu T-króciec 6.2.4 z Σl<sub>eff</sub> = 2h<sub>p</sub>, środnik rozciągany, spoiny),
+- blacha żebrowa (grupa mimośrodowa n<sub>r</sub>×n<sub>c</sub>, docisk blachy i środnika, blacha brutto/netto/blokowe, zginanie gdy h<sub>p</sub> < 2,73z<sub>c</sub>, zwichrzenie długiej blachy gdy z<sub>c</sub> > t<sub>p</sub>/0,15 – λ̄<sub>LT</sub> = 2,8√(z<sub>c</sub>h<sub>p</sub>/(1,5t<sub>p</sub>²))/(93,9ε), krzywa d; spoiny V + V·z<sub>c</sub>; ścinanie lokalne i przebicie ścianki podpory),
+- kątowniki podwójne (śruby dwucięte w środniku z mimośrodem g<sub>b</sub>, jednocięte w podporze; docisk w kątownikach, środniku i podporze; ścinanie i rozerwanie blokowe obu ramion; zginanie ramion; przy wiązaniu ramiona na podporze jako T-króciec m = g<sub>s</sub> − t<sub>a</sub> − 0,8r),
+- połączenie spawane (grupa spoin w płaszczyźnie styku: V przenoszą spoiny środnika, N i M – cała grupa; σ<sub>⊥</sub> = τ<sub>⊥</sub> = σ<sub>w</sub>/√2; spoina czołowa z pełnym przetopem – nośność jak przekroju, 4.7.1),
+- styk nakładkowy (M<sub>w</sub> = M·I<sub>w</sub>/I, F<sub>f</sub> = (M − M<sub>w</sub>)/(h − t<sub>f</sub>) + N·A<sub>f</sub>/A; śruby nakładek pasów jedno- lub dwucięte z β<sub>Lf</sub> i poślizgiem, docisk do pasa i nakładek, nakładki brutto/netto/blokowe, pas netto, p<sub>1</sub> ≤ 9tε dla nakładek ściskanych; środnik: V, N<sub>w</sub>, M<sub>w</sub> + V·e na grupę dwuciętą, nakładki środnika ścinanie i zginanie),
+- styk spawany czołowy (nośność przekroju z redukcją od ścinania).
+
+**Konstrukcja**: rozstawy tabl. 3.3 (min i max) są warunkami; zalecenia (ciągliwość t<sub>p</sub> ≤ 0,5d lub 0,42d, e<sub>2</sub>, e<sub>2,b</sub> ≥ 2d, h<sub>p</sub> ≥ 0,6h, spoiny pełnonośne a ≥ t·f<sub>y</sub>√2β<sub>w</sub>γ<sub>M2</sub>/(2f<sub>u</sub>γ<sub>M0</sub>), dostęp klucza, e ≤ 4t + 40 przy korozji) – status „uwaga”. Spoiny łączące różne gatunki – właściwości słabszego materiału (4.5.3.2(6)).
+
+**Dobór** (`W.auto`, `W.autoSplice`): przegląd średnic, liczby rzędów i kolumn, grubości blach, spoin, kątowników z katalogu; spośród wariantów spełniających warunki (wytężenie ≤ η) wybierany jest najtańszy (masa blach + śruby + spoiny + kara za niespełnione zalecenia).
 
 ## 9. Pożar, zmęczenie, kruche pękanie, EXC (`dodatkowe.js`)
 

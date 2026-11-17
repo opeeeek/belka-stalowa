@@ -81,6 +81,10 @@ const GROUPS = [
     { k: 'analiza.slupekSztywny', t: 'chk', l: 'Sztywny słupek podporowy (wyboczenie środnika przy ścinaniu)' },
     { t: 'hint', ex: true, exT: 'Jak liczony jest moment krytyczny M_cr?', h: () => 'M<sub>cr</sub> wyznacza metoda elementów skończonych (u, u′, φ, φ′) dla rzeczywistego rozkładu M<sub>y</sub> z każdej decydującej kombinacji i każdego etapu – z wysokością przyłożenia obciążeń (pas górny / środek ścinania / pas dolny), monosymetrią przekroju i wszystkimi stężeniami. Postać zwichrzenia – zakładka <b>Stateczność</b>.' }
   ] },
+  { id: 'conn', title: 'Połączenia i styki', items: [
+    { t: 'html', h: () => connSummaryHTML() },
+    { t: 'hint', ex: true, exT: 'Jakie połączenia można zaprojektować?', h: () => 'Podpory: blacha czołowa (krótka lub pełna), blacha żebrowa (1–2 kolumny śrub), kątowniki podwójne, połączenie spawane (środnik, obwodowe, czołowe), płyta podporowa, oparcie na stali z żebrami. Styki montażowe: nakładkowy śrubowy (nakładki pasów zewnętrzne i wewnętrzne, nakładki środnika; kategorie A/B/C, śruby sprężane) lub spawany czołowy. Śruby: M12–M30, klasy 4.6–10.9, otwory normalne lub powiększone, gwint w płaszczyźnie ścinania. Sprawdzenia wg PN-EN 1993-1-8 (tabl. 3.3, 3.4, 3.7–3.10, 4.5, 6.2.4) i zaleceń SCI P358 (ciągliwość, stężenie skrętne).' }
+  ] },
   { id: 'sls', title: 'SGU – parametry', items: [
     { k: 'sgu.typ', t: 'sel', l: 'Rodzaj elementu', o: () => Object.keys(N.UGIECIA).map(k => [k, N.UGIECIA[k].nazwa]), wide: true, re: true },
     { k: 'sgu.wmax', t: 'sel', l: 'Ugięcie graniczne w_{max}', o: [150, 200, 250, 300, 350, 400, 500].map(v => [v, 'L/' + v]), num: true },
@@ -157,6 +161,14 @@ function secHint() {
   if (!R || !R.sec || !R.base) return '';
   const s = R.sec, b = R.base;
   return `${esc(s.nazwa)}: A = ${fmt(s.A / 100, 1)} cm², I<sub>y</sub> = ${fmt(s.Iy / 1e4, 0)} cm⁴, W<sub>pl,y</sub> = ${fmt(s.Wpl_y / 1e3, 1)} cm³, ${fmt(s.masa, 1)} kg/m · f<sub>y</sub> = ${R.mat.fy} MPa, f<sub>u</sub> = ${R.mat.fu} MPa · klasa przy zginaniu ${b.kPos.cls}${b.kNeg.cls !== b.kPos.cls ? '/' + b.kNeg.cls : ''} · M<sub>c,Rd</sub> = ${fmt(b.Mc_pos / 1e6, 1)} kNm, V<sub>Rd</sub> = ${fmt(b.Vpl / 1e3, 1)} kN`;
+}
+function connSummaryHTML() {
+  if (!R || !R.md) return '';
+  const row = (lab, txt, cs, attr) => { const um = Math.max(0, ...cs.filter(c => c.util !== null && isFinite(c.util)).map(c => c.util)), bad = cs.some(c => c.status === 'fail'); return `<tr ${attr} class="xclick" style="cursor:pointer"><td style="white-space:nowrap"><b>${lab}</b></td><td style="text-align:left">${esc(txt)}</td><td class="n"><span class="st ${bad ? 'fail' : cs.some(c => c.status === 'warn') ? 'warn' : 'ok'}">${bad ? '✖' : '✔'} ${fmt(um * 100, 0)}%</span></td></tr>`; };
+  let h = '<table class="kv" style="width:100%">';
+  R.md.sup.forEach((p, i) => { const rp = (R.podpory || []).find(q => q.id === p.id) || { checks: [] }; h += row(`Podpora ${p.id}`, J.jointTxt((S.podpory[i] || {}).wezel || {}, R.sec), rp.checks, `data-cjs="${i}"`); });
+  (S.styki || []).forEach((st2, j) => { const cs = R.checks.filter(c => c.id.indexOf(`S${j + 1}-`) === 0); h += row(`Styk S${j + 1}`, `x = ${fmt(U.num(st2.x), 2)} m – ${(BS.W.STYKI[st2.typ] || '')}`, cs, `data-cjt="${j}"`); });
+  return h + `</table><div class="row wide"><span></span><span><button class="btn sm pri" data-act="jdes" type="button">Projektowanie połączeń…</button> <button class="btn sm" data-act="addsplice" type="button">+ styk montażowy</button></span></div>`;
 }
 function loadMiniHTML() {
   const n = S.obciazenia.length, on = S.obciazenia.filter(o => o.aktywne !== false).length;
@@ -270,7 +282,8 @@ function numInput(el, final) {
 A.numInput = numInput;
 // wiązanie pól (dane i okna): select[data-k], .combo input[data-k], checkbox[data-k], input[data-kt]
 function bindFields(host, after) {
-  const done = (re) => { if (after) after(re); };
+  // przebudowa okna odroczona i scalona (zmiana pola → blur → change nie może przebudowywać DOM w trakcie przebudowy)
+  const done = (re) => { if (!after) return; if (!re) { after(false); return; } if (host.__pend) return; host.__pend = true; setTimeout(() => { host.__pend = false; after(true); }, 0); };
   $$('select[data-k]', host).forEach(el => el.addEventListener('change', () => {
     let v = el.value; if (el.dataset.num) v = parseNum(v);
     setP(S, el.dataset.k, v); onSet(el.dataset.k, v); changed(!!el.dataset.re); done(!!el.dataset.re);
@@ -337,6 +350,7 @@ const DSUM = [
   ['SGU', 'ugięcie', c => /^SGU – ugięcia/.test(c.grp)],
   ['SGU', 'drgania', c => /^SGU – drgania/.test(c.grp)],
   ['', 'podpory i węzły', c => /^Podpory/.test(c.grp)],
+  ['', 'styki', c => /^Styki/.test(c.grp)],
   ['', 'pożar', c => /^Pożar/.test(c.grp)],
   ['', 'zmęczenie', c => /^Zmęczenie/.test(c.grp)],
   ['', 'kruche pękanie', c => /^Kruche/.test(c.grp)]
@@ -422,6 +436,13 @@ function beamTabsHTML() {
 }
 function selList() { const md = R && R.md; return md ? Array.from(selSpans).filter(i => md.seg[i]).sort((a, b) => a - b) : []; }
 A.selList = selList;
+A.addSplice = function (x) {
+  if (!R || !R.md || !R.sec) { Q.toast('Najpierw usuń błędy danych.'); return; }
+  const sg = R.md.seg.find(z => !z.wsp) || R.md.seg[0];
+  if (x === undefined) x = +((sg.x0 + sg.x1) / 2000).toFixed(2);
+  S.styki = S.styki || []; S.styki.push(BS.W.spliceDefaults(R.sec, x));
+  changed(true); recalc(); A.jointDesigner({ styk: S.styki.length - 1 });
+};
 function renderDataSide() {
   const el = $('#dataside'); if (!el) return;
   if (!R || !R.md) { el.innerHTML = `<div class="box">${beamTabsHTML()}${(R && R.errors || []).map(e => `<div class="msg err">${esc(e)}</div>`).join('') || '<p class="hint">Brak modelu.</p>'}</div>`; bindSide(el); return; }
@@ -431,7 +452,7 @@ function renderDataSide() {
   const leg = [], out = {};
   const svg = D.scheme(S, R, { W: W2, etap: s, edit: true, sel: selSpans, diag: diagMode === 'off' ? null : diagMode, legend: leg, dims: showDims, out });
   const sel = selList().map(i => md.seg[i].n);
-  const tools = `<span class="schtools">${[['loads', 'Obciążenia', 'Okno obciążeń: zaznaczonych przęseł albo całej belki'], ['sec', 'Przekrój', 'Przekrój i materiał belki'], ['brace', 'Stężenia', 'Stężenia boczne i skrętne, stężenie ciągłe'], ['stages', 'Etapy', 'Etapy realizacji i podpory montażowe'], ['dims', 'Wymiary', 'Pokaż / ukryj wymiary']].map(([k, l, t]) => `<button class="btn sm${k === 'dims' && showDims ? ' on' : ''}" data-tool="${k}" type="button" title="${t}">${l}</button>`).join('')}</span>`;
+  const tools = `<span class="schtools">${[['loads', 'Obciążenia', 'Okno obciążeń: zaznaczonych przęseł albo całej belki'], ['sec', 'Przekrój', 'Przekrój i materiał belki'], ['conn', 'Połączenia', 'Okno projektowania połączeń i styków'], ['brace', 'Stężenia', 'Stężenia boczne i skrętne, stężenie ciągłe'], ['stages', 'Etapy', 'Etapy realizacji i podpory montażowe'], ['dims', 'Wymiary', 'Pokaż / ukryj wymiary']].map(([k, l, t]) => `<button class="btn sm${k === 'dims' && showDims ? ' on' : ''}" data-tool="${k}" type="button" title="${t}">${l}</button>`).join('')}</span>`;
   const seen = new Set(), legH = leg.filter(q => { const k = String(q.li); if (seen.has(k)) return false; seen.add(k); return true; }).map(q => `<label class="ldl${q.off ? ' off' : ''}" style="top:${(q.y / (out.H || 1) * 100).toFixed(2)}%" title="${q.sw ? 'Ciężar własny belki' : q.off ? 'Obciążenie pominięte – zaznacz, aby uwzględnić' : 'Odznacz, aby pominąć obciążenie w obliczeniach'}"><input type="checkbox" data-ldon="${q.li}" ${q.off ? '' : 'checked'}><i style="background:${q.col}"></i><span>${esc(q.lab)}</span></label>`).join('');
   const dgSw = `<span class="segsw sm dgsw">${[['M', 'M'], ['V', 'V'], ['w', 'ugięcie'], ['N', 'N'], ['R', 'R'], ['off', 'bez wykresu']].map(([k, l]) => `<button type="button" data-dgm="${k}" class="${diagMode === k ? 'on' : ''}">${l}</button>`).join('')}</span>`;
   const stSw = md.nE > 1 ? `<span class="segsw sm">${md.etapy.map((e, i) => `<button type="button" data-stg="${i}" class="${i === s ? 'on' : ''}" title="${esc(e.nazwa)}">Etap ${i + 1}</button>`).join('')}</span>` : '';
@@ -460,7 +481,7 @@ A.renderDataSide = renderDataSide;
 function supRowTxt(i) {
   const p = S.podpory[i] || {}, w = p.wezel || {};
   const t = ({ przegub: p.przesuwna ? 'przegubowa przesuwna' : 'przegubowa', utwierdzenie: 'utwierdzenie', sprezyna: 'sprężysta', podatne: 'przegub + sprężyna obrotowa' })[p.typ] || p.typ;
-  const wz = ({ brak: 'oparcie na stali', oparcie: `płyta podporowa na ${w.podloze === 'mur' ? 'murze' : w.podloze === 'stal' ? 'stali' : 'betonie'}`, blacha_czolowa: 'krótka blacha czołowa', blacha_zebrowa: 'blacha żebrowa' })[w.typ || 'brak'];
+  const wz = ({ brak: 'oparcie na stali', oparcie: `płyta podporowa na ${w.podloze === 'mur' ? 'murze' : w.podloze === 'stal' ? 'stali' : 'betonie'}`, blacha_czolowa: 'blacha czołowa', blacha_zebrowa: 'blacha żebrowa', katowniki: 'kątowniki podwójne', spawane: 'połączenie spawane' })[w.typ || 'brak'] || w.typ;
   return `${t}; zwichrzenie: ${p.ltb === 'pelne' ? 'utwierdzenie' : 'widełkowa'}; ${wz}${w.zebro ? ', żebra podporowe' : ''}`;
 }
 A.supRowTxt = supRowTxt;
@@ -491,6 +512,7 @@ function bindSide(el) {
   $$('tr[data-sup], button[data-sup]', el).forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); A.supportPopup(+b.dataset.sup); }));
   $$('.tsupp, tr[data-tmp], button[data-tmp]', el).forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); A.stagesPopup(); }));
   $$('.rst', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.bracePopup(g.dataset.rst === 'g' ? null : +g.dataset.rst); }));
+  $$('.sty', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.jointDesigner({ styk: +g.dataset.sty }); }));
   $$('[data-cont]', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.bracePopup(); }));
   $$('.elm', el).forEach(g => g.addEventListener('click', ev => { const k = +g.dataset.seg; if (selSpans.has(k)) selSpans.delete(k); else selSpans.add(k); renderDataSide(); }));
   $$('.ld', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); const li = g.dataset.li; if (li === 'sw') { const f = $('[data-ck="ciezarWlasny.auto"]', el); if (f) Q.flash(f.closest('label')); return; } A.loadPopup({ focus: +li }); }));
@@ -499,7 +521,8 @@ function bindSide(el) {
     sw.addEventListener('contextmenu', ev => {
       ev.preventDefault();
       const t = ev.target.closest ? ev.target : null; if (!t) return;
-      const sp = t.closest('.supp'), ld = t.closest('.ld'), rs = t.closest('.rst'), tp = t.closest('.tsupp');
+      const sp = t.closest('.supp'), ld = t.closest('.ld'), rs = t.closest('.rst'), tp = t.closest('.tsupp'), sy = t.closest('.sty');
+      if (sy) return Q.ctxMenu(ev.clientX, ev.clientY, [['jd', `Styk S${+sy.dataset.sty + 1} – projektowanie…`], ['-'], ['del', 'Usuń styk']], async a => { const j = +sy.dataset.sty; if (a === 'jd') A.jointDesigner({ styk: j }); else if (await Q.ask(`Usunąć styk S${j + 1}?`, 'Usuń', true)) { S.styki.splice(j, 1); changed(true); } });
       if (sp) return supMenu(ev.clientX, ev.clientY, +sp.dataset.sup);
       if (ld && ld.dataset.li !== 'sw') return loadMenu(ev.clientX, ev.clientY, +ld.dataset.li);
       if (rs) return braceMenu(ev.clientX, ev.clientY, rs.dataset.rst);
@@ -532,18 +555,21 @@ function schemeAct(a) {
   else if (a === 'all') { R.md.seg.forEach((sg, i) => selSpans.add(i)); renderDataSide(); }
   else if (a === 'none') { selSpans.clear(); renderDataSide(); }
   else if (a === 'schemes') A.schemesPopup();
+  else if (a === 'conn') A.jointDesigner();
+  else if (a === 'splice') { const sl = selList(); const sg = R.md.seg[sl.length ? sl[0] : 0]; A.addSplice(sg ? +((sg.x0 + sg.x1) / 2000).toFixed(2) : undefined); }
 }
 A.schemeAct = schemeAct;
 function supMenu(x, y, i) {
   const p = S.podpory[i]; if (!p) return;
   const id = R.md.sup[i] ? R.md.sup[i].id : i + 1, ck = (c) => (c ? '✓ ' : '');
-  Q.ctxMenu(x, y, [['pop', `Podpora ${esc(id)} – oparcie / połączenie…`], ['-'], ['przegub', ck(p.typ === 'przegub') + 'Przegubowa'], ['utwierdzenie', ck(p.typ === 'utwierdzenie') + 'Utwierdzenie'], ['sprezyna', ck(p.typ === 'sprezyna') + 'Sprężysta…'], ['przes', ck(!!p.przesuwna) + 'Przesuwna (łożysko przesuwne)', p.typ !== 'przegub'], ['-'], ['wid', ck(p.ltb !== 'pelne') + 'Zwichrzenie: podparcie widełkowe'], ['pel', ck(p.ltb === 'pelne') + 'Zwichrzenie: pełne utwierdzenie'], ['-'], ['jb', 'Krótka blacha czołowa…'], ['jf', 'Blacha żebrowa…'], ['jo', 'Płyta podporowa (beton / mur)…'], ['js', 'Oparcie na stali (+ żebra)…']], a => {
+  Q.ctxMenu(x, y, [['jd', `Projektowanie połączenia ${esc(id)}…`], ['pop', `Podpora ${esc(id)} – warunki podparcia…`], ['-'], ['przegub', ck(p.typ === 'przegub') + 'Przegubowa'], ['utwierdzenie', ck(p.typ === 'utwierdzenie') + 'Utwierdzenie'], ['sprezyna', ck(p.typ === 'sprezyna') + 'Sprężysta…'], ['przes', ck(!!p.przesuwna) + 'Przesuwna (łożysko przesuwne)', p.typ !== 'przegub'], ['-'], ['wid', ck(p.ltb !== 'pelne') + 'Zwichrzenie: podparcie widełkowe'], ['pel', ck(p.ltb === 'pelne') + 'Zwichrzenie: pełne utwierdzenie'], ['-'], ['jb', 'Blacha czołowa…'], ['jf', 'Blacha żebrowa…'], ['jk', 'Kątowniki podwójne…'], ['jw', 'Połączenie spawane…'], ['jo', 'Płyta podporowa (beton / mur)…'], ['js', 'Oparcie na stali (+ żebra)…']], a => {
     if (a === 'pop') return A.supportPopup(i);
+    if (a === 'jd') return A.jointDesigner({ sup: i });
     if (['przegub', 'utwierdzenie', 'sprezyna'].includes(a)) { p.typ = a; if (a === 'utwierdzenie') p.ltb = 'pelne'; if (a !== 'przegub') p.przesuwna = false; S.schemat = schemeOf(); changed(true); if (a === 'sprezyna') A.supportPopup(i); return; }
     if (a === 'przes') { p.przesuwna = !p.przesuwna; changed(true); return; }
     if (a === 'wid' || a === 'pel') { p.ltb = a === 'pel' ? 'pelne' : 'widelkowe'; changed(true); return; }
-    const t = { jb: 'blacha_czolowa', jf: 'blacha_zebrowa', jo: 'oparcie', js: 'brak' }[a];
-    if (t) { if ((p.wezel || {}).typ !== t) p.wezel = Object.assign({ typ: t }, A.JDEF(t, R.sec && R.sec.h)); A.recalcNow(); A.supportPopup(i, t === 'brak' ? 'stiff' : 'plate'); }
+    const t = { jb: 'blacha_czolowa', jf: 'blacha_zebrowa', jk: 'katowniki', jw: 'spawane', jo: 'oparcie', js: 'brak' }[a];
+    if (t) { if ((p.wezel || {}).typ !== t) p.wezel = Object.assign({ typ: t }, BS.W.defaults(t, R.sec)); changed(true); A.recalcNow(); A.jointDesigner({ sup: i }); }
   });
 }
 function loadMenu(x, y, li) {
@@ -566,7 +592,7 @@ function braceMenu(x, y, src) {
 }
 function schemeMenu(x, y) {
   const n = selSpans.size, md = R.md;
-  const it = [['loads', n ? `Obciążenia – ${n === 1 ? md.seg[selList()[0]].n : `zaznaczone (${n})`}…` : 'Obciążenia – cała belka…'], ['sec', 'Przekrój…'], ['brace', 'Stężenia boczne…'], ['stages', 'Etapy realizacji i podpory montażowe…'], ['schemes', 'Schematy typowe…'], ['dims', `${showDims ? '✓ ' : ''}Wymiary`], ['-'], ['all', 'Zaznacz wszystkie przęsła'], ['none', 'Odznacz wszystko (Esc)', !n]];
+  const it = [['loads', n ? `Obciążenia – ${n === 1 ? md.seg[selList()[0]].n : `zaznaczone (${n})`}…` : 'Obciążenia – cała belka…'], ['sec', 'Przekrój…'], ['brace', 'Stężenia boczne…'], ['stages', 'Etapy realizacji i podpory montażowe…'], ['schemes', 'Schematy typowe…'], ['conn', 'Projektowanie połączeń…'], ['splice', n ? 'Styk montażowy w środku zaznaczonego przęsła…' : 'Styk montażowy…'], ['dims', `${showDims ? '✓ ' : ''}Wymiary`], ['-'], ['all', 'Zaznacz wszystkie przęsła'], ['none', 'Odznacz wszystko (Esc)', !n]];
   Q.ctxMenu(x, y, it.map(([k, l, d]) => [k, esc(l || ''), d]), schemeAct);
 }
 
@@ -614,6 +640,7 @@ document.addEventListener('click', async e => {
   const t = e.target.closest && e.target.closest('[data-btab]'); if (t) { switchBeam(+t.dataset.btab); return; }
   if (e.target.closest && e.target.closest('[data-badd]')) addBeam();
 });
+document.addEventListener('click', e => { const a = e.target.closest && e.target.closest('[data-cjs], [data-cjt]'); if (!a || !a.closest('#inputs')) return; if (a.dataset.cjs !== undefined) A.jointDesigner({ sup: +a.dataset.cjs }); else A.jointDesigner({ styk: +a.dataset.cjt }); });
 document.addEventListener('dblclick', e => { const t = e.target.closest && e.target.closest('[data-btab]'); if (!t) return; const f = $('#projName'); if (f) { f.focus(); f.select(); } });
 let asT = null;
 function autosave() {
@@ -673,7 +700,7 @@ function about() {
 }
 function doAct(a) {
   ({ new: newProject, open: openFile, save: () => saveFile(false), saveas: () => saveFile(true), print: doPrint, exporthtml: () => BS.V.exportHTML(), about,
-    schemes: () => A.schemesPopup(), secwin: () => A.secPopup(), sectab: () => A.secTablePopup(), loads: () => A.loadPopup({ all: true }), snow: () => A.snowPopup() }[a] || (() => {}))();
+    schemes: () => A.schemesPopup(), jdes: () => A.jointDesigner(), addsplice: () => A.addSplice(), secwin: () => A.secPopup(), sectab: () => A.secTablePopup(), loads: () => A.loadPopup({ all: true }), snow: () => A.snowPopup() }[a] || (() => {}))();
 }
 A.doAct = doAct;
 

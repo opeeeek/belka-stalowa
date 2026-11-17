@@ -195,26 +195,36 @@ V.ltb = function (el) {
 };
 
 /* ================================================================ BELKA I POŁĄCZENIA */
+const miniChecks = (cs) => `<table class="kv" style="width:100%;margin-top:4px">${cs.filter(c => !c.info).slice().sort((a, b) => (b.util || 0) - (a.util || 0)).slice(0, 5).map(c => `<tr><td style="font-size:11.5px">${esc(c.n.replace(/^[^:]+: /, ''))}</td><td style="white-space:nowrap">${A.utilBar(c)}</td></tr>`).join('')}</table>`;
 V.elev = function (el) {
   if (!ok()) { el.innerHTML = head(el) + errBox(); bindHead(el); return; }
   const r = R(), md = r.md, sec = r.sec, W = W0(el), out = {};
-  let h = head(el) + `<div class="box elevbox"><h4>Belka – widok podłużny <span class="hint" style="margin-left:8px;font-weight:400">kliknij węzeł / oparcie, stężenie lub podporę montażową · Ctrl + kółko – powiększenie</span></h4><div class="elevwrap"><div class="zoomtgt">${D.elevation(S(), r, { W, out })}</div></div><div id="veInfo" class="hint" style="min-height:18px"></div></div>`;
+  let h = head(el) + `<div class="box elevbox"><h4>Belka – widok podłużny <span class="hint" style="margin-left:8px;font-weight:400">kliknij węzeł / oparcie lub styk – okno projektowania połączeń; stężenie, podporę montażową · Ctrl + kółko – powiększenie</span><button class="btn sm pri" id="veJd" type="button" style="float:right">Projektowanie połączeń…</button></h4><div class="elevwrap"><div class="zoomtgt">${D.elevation(S(), r, { W, out })}</div></div><div id="veInfo" class="hint" style="min-height:18px"></div></div>`;
   h += '<div class="cards jcards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px">';
   (r.podpory || []).filter(p => !p.tymcz).forEach(p => {
     const i = md.sup.findIndex(q => q.id === p.id), w = (S().podpory[i] || {}).wezel || { typ: 'brak' };
     const st = p.checks.some(c => c.status === 'fail') ? 'fail' : p.checks.some(c => c.status === 'warn') ? 'warn' : 'ok';
     const um = Math.max(0, ...p.checks.filter(c => c.util !== null && isFinite(c.util)).map(c => c.util));
-    h += `<div class="box card ${st}" data-jsup="${i}" style="cursor:pointer"><div class="t"><b>Podpora ${esc(p.id)}</b> – ${esc(A.supRowTxt(i))}</div><div class="jsk" data-jsk="${i}">${sec.kind !== 'L' ? D.joint(sec, w, { W: 320, H: 220 }) : ''}</div><div class="s">R<sub>Ed,max</sub> = <b>${fmt(p.Rmax / 1e3, 1)} kN</b> · sprawdzeń ${p.checks.length} · max ${fmt(um * 100, 0)}%</div>${A.checksHTML(p.checks)}</div>`;
+    h += `<div class="box card ${st}" data-jsup="${i}" style="cursor:pointer" title="Kliknij – okno projektowania połączenia"><div class="t"><b>Podpora ${esc(p.id)}</b> – ${esc(J.jointTxt(w, sec))}</div><div class="jsk" data-jsk="${i}">${sec.kind === 'L' ? '' : p.pol ? D.jointViews(sec, w, p.pol, { W: 340, H: 240 }).elev : D.joint(sec, w, { W: 320, H: 220 })}</div><div class="s">R<sub>Ed,max</sub> = <b>${fmt(p.Rmax / 1e3, 1)} kN</b> · sprawdzeń ${p.checks.length} · max ${fmt(um * 100, 0)}%</div>${miniChecks(p.checks)}</div>`;
   });
+  (r.styki || []).forEach((q, j) => {
+    const o = q.o, um = o ? Math.max(0, ...o.checks.map(c => (isFinite(c.u) ? c.u : 9.99))) : 0, bad = !o || um > 1 + 1e-9 || (o.detalFail || []).length;
+    h += `<div class="box card ${bad ? 'fail' : (o.zalFail || []).length ? 'warn' : 'ok'}" data-jsty="${j}" style="cursor:pointer" title="Kliknij – okno projektowania styku"><div class="t"><b>Styk ${q.id}</b> – x = ${fmt(q.x / 1000, 2)} m · ${esc(BS.W.STYKI[S().styki[j].typ] || '')}</div><div class="jsk">${o && o.geom ? D.spliceViews(sec, S().styki[j], o, { W: 360, H: 240 }).elev : ''}</div><div class="s">M<sub>Ed</sub> = ${fmt(q.F.M / 1e6, 1)} kNm · V<sub>Ed</sub> = ${fmt(q.F.V / 1e3, 1)} kN · max ${fmt(um * 100, 0)}%</div></div>`;
+  });
+  h += `<div class="box card" data-jadd2="1" style="cursor:pointer;display:flex;align-items:center;justify-content:center;min-height:120px" title="Dodaj styk montażowy belki"><b>+ styk montażowy</b></div>`;
   h += '</div>';
   const to = RP.takeoff(S(), r);
   h += `<div class="box"><h4>Zestawienie materiałów</h4><div class="tscroll"><table class="sched"><tr><th>Poz.</th><th>Element</th><th>Materiał</th><th>Szt.</th><th>Wymiary [mm]</th><th>Masa [kg]</th></tr>${to.rows.map(q => `<tr><td>${q.poz}</td><td>${esc(q.n)}</td><td>${esc(q.mat)}</td><td class="n">${q.szt}</td><td>${esc(q.wym)}</td><td class="n">${fmt(q.m, 1)}</td></tr>`).join('')}<tr><td></td><td><b>Razem</b></td><td></td><td></td><td></td><td class="n"><b>${fmt(to.total, 1)}</b></td></tr></table></div>${Object.keys(to.bolts).length ? `<p class="hint">Śruby: ${Object.keys(to.bolts).map(k => `${to.bolts[k]} × ${esc(k)}`).join(', ')} (z nakrętkami i podkładkami); spoiny pachwinowe ok. ${fmt(to.weld / 1000, 2)} m.</p>` : ''}<p class="hint">Klasa wykonania: <b>${r.exc ? r.exc.exc : '—'}</b>${r.exc ? ' – ' + esc(r.exc.why.join('; ')) : ''}.</p></div>`;
   el.innerHTML = h;
   bindHead(el); Q.themeSvgIn(el); Q.zoomApply(el); A.bindNref(el);
-  $$('.jnt', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.supportPopup(+g.dataset.sup); }));
+  const jd = $('#veJd', el); if (jd) jd.onclick = () => A.jointDesigner();
+  $$('.jnt', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.jointDesigner({ sup: +g.dataset.sup }); }));
+  $$('.sty', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.jointDesigner({ styk: +g.dataset.sty }); }));
+  $$('[data-jsty]', el).forEach(c => c.addEventListener('click', () => A.jointDesigner({ styk: +c.dataset.jsty })));
+  $$('[data-jadd2]', el).forEach(c => c.addEventListener('click', () => A.addSplice()));
   $$('.rst', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.bracePopup(g.dataset.rst === 'g' ? null : +g.dataset.rst); }));
   $$('.tsupp', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.stagesPopup(); }));
-  $$('[data-jsup]', el).forEach(c => c.addEventListener('click', ev => { if (ev.target.closest('button')) return; const sk = ev.target.closest('.jsk'); let zone = null; if (sk) { const rr = sk.getBoundingClientRect(), x = ev.clientX - rr.left, y = ev.clientY - rr.top; zone = x < rr.width * 0.42 ? (y > rr.height * 0.75 ? 'sup' : 'plate') : 'bolts'; } A.supportPopup(+c.dataset.jsup, zone); }));
+  $$('[data-jsup]', el).forEach(c => c.addEventListener('click', ev => { if (ev.target.closest('button')) return; A.jointDesigner({ sup: +c.dataset.jsup }); }));
   // kursor na widoku: x i siły w tym miejscu
   const svg = $('svg.elev', el), info = $('#veInfo', el), s = md.nE - 1, ev2 = r.env[s], xs = r.an.xs;
   if (svg && out.X) svg.addEventListener('mousemove', e => {

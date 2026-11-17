@@ -163,44 +163,41 @@ const JDEF = (v, h) => ({
 }[v] || {});
 A.JDEF = JDEF;
 const BOLTS = () => Object.keys(M.SRUBY).map(k => [k, k]), BKL = () => Object.keys(M.SRUBY_KL).map(k => [k, 'kl. ' + k]);
-function jointFields(i) {
+function jointFields(i, designer) {
   const st = S(), p = st.podpory[i], w = p.wezel || (p.wezel = { typ: 'brak' }), q = `podpory.${i}.wezel`, sec = R() && R().sec;
-  let h = fSel(q + '.typ', 'Oparcie / połączenie', [['brak', 'oparcie na elemencie stalowym (bez płyty)'], ['oparcie', 'płyta podporowa na betonie / murze'], ['blacha_czolowa', 'krótka blacha czołowa (śruby do podpory)'], ['blacha_zebrowa', 'blacha żebrowa (śruby przez środnik)']], { wide: true });
+  const sub = (k, l) => `<div class="lsub" data-jz="${k}" data-js="${k}">${l}</div>`;
+  let h = designer ? '' : fSel(q + '.typ', 'Oparcie / połączenie', [['brak', 'oparcie na elemencie stalowym (bez płyty)'], ['oparcie', 'płyta podporowa na betonie / murze'], ['blacha_czolowa', 'blacha czołowa (śruby do podpory)'], ['blacha_zebrowa', 'blacha żebrowa (śruby przez środnik)'], ['katowniki', 'kątowniki podwójne'], ['spawane', 'połączenie spawane']], { wide: true });
   if (w.typ === 'oparcie') {
     h += fSel(q + '.podloze', 'Podłoże', [['beton', 'beton (PN-EN 1992-1-1, 6.7)'], ['mur', 'mur (PN-EN 1996-1-1, 6.1.3)'], ['stal', 'element stalowy']], { wide: true });
     if (w.podloze !== 'stal') {
-      h += `<div class="lsub" data-jz="plate">Płyta podporowa</div>` + fNum(q + '.bp', 'Szerokość płyty b_{p}', 'mm', [120, 150, 180, 200, 220, 250, 300], { min: 20 }) + fNum(q + '.lp', 'Długość oparcia l_{p}', 'mm', [80, 100, 120, 150, 180, 200, 250], { min: 20 }) + fNum(q + '.tp', 'Grubość płyty t_{p}', 'mm', [8, 10, 12, 15, 20, 25, 30], { min: 4 });
+      h += sub('plate', 'Płyta podporowa') + fNum(q + '.bp', 'Szerokość płyty b_{p}', 'mm', [120, 150, 180, 200, 220, 250, 300], { min: 20 }) + fNum(q + '.lp', 'Długość oparcia l_{p}', 'mm', [80, 100, 120, 150, 180, 200, 250], { min: 20 }) + fNum(q + '.tp', 'Grubość płyty t_{p}', 'mm', [8, 10, 12, 15, 20, 25, 30], { min: 4 });
       if (w.podloze === 'beton') h += fSel(q + '.beton', 'Klasa betonu', Object.keys(M.BETON).map(k => [k, k])) + fNum(q + '.alfa', 'α = √(A_{c1}/A_{c0}) ≤ 3', '', [1, 1.5, 2, 2.5, 3], { min: 1, max: 3 });
       else h += fNum(q + '.fd', 'Wytrzymałość muru f_{d}', 'MPa', [1, 1.5, 2, 2.5, 3, 4], { min: 0.1 }) + fNum(q + '.beta', 'β – docisk skupiony (1,0–1,5)', '', [1, 1.2, 1.5], { min: 1, max: 1.5 });
     }
   }
   if (w.typ === 'oparcie' || w.typ === 'brak') {
+    if (designer) h += sub('sup', 'Docisk środnika nad podporą') + fNum(`podpory.${i}.ss`, 'Długość docisku s_{s}', 'mm', [0, 50, 80, 100, 120, 150, 200], { min: 0 }) + fNum(`podpory.${i}.c`, 'Odległość docisku od końca belki c', 'mm', [0, 10, 20, 30, 50, 80, 100], { min: 0 });
     if (sec && (sec.kind === 'I' || sec.kind === 'U')) {
-      h += fChk(q + '.zebro', 'Żebra podporowe (para żeber nad podporą)');
-      if (w.zebro) h += `<div class="lsub" data-jz="stiff">Żebra podporowe</div>` + fNum(q + '.bs', 'Szerokość żebra b_{s}', 'mm', [40, 50, 60, 70, 80, 90, 100, 120], { min: 20 }) + fNum(q + '.ts', 'Grubość żebra t_{s}', 'mm', [6, 8, 10, 12, 15, 20], { min: 4 }) + fNum(q + '.ch', 'Ścięcie naroża (spoina pas–środnik)', 'mm', [10, 15, 20, 25], { min: 0 });
+      h += fChk(q + '.zebro', 'Żebra podporowe (para żeber nad podporą)', { re: true });
+      if (w.zebro) h += sub('stiff', 'Żebra podporowe') + fNum(q + '.bs', 'Szerokość żebra b_{s}', 'mm', [40, 50, 60, 70, 80, 90, 100, 120], { min: 20 }) + fNum(q + '.ts', 'Grubość żebra t_{s}', 'mm', [6, 8, 10, 12, 15, 20], { min: 4 }) + fNum(q + '.ch', 'Ścięcie naroża (spoina pas–środnik)', 'mm', [10, 15, 20, 25], { min: 0 });
     }
   }
-  if (w.typ === 'blacha_czolowa' || w.typ === 'blacha_zebrowa') {
-    const fin = w.typ === 'blacha_zebrowa';
-    h += `<div class="lsub" data-jz="plate">${fin ? 'Blacha żebrowa' : 'Blacha czołowa'}</div>` + fNum(q + '.hp', 'Wysokość blachy h_{p}', 'mm', [100, 130, 150, 170, 200, 230, 260, 300, 350, 400], { min: 50 }) + (fin ? '' : fNum(q + '.bp', 'Szerokość blachy b_{p}', 'mm', [100, 120, 140, 150, 160, 180, 200], { min: 50 })) + fNum(q + '.tp', 'Grubość blachy t_{p}', 'mm', [6, 8, 10, 12, 15], { min: 3 }) + fNum(q + '.a', 'Spoina pachwinowa a', 'mm', [3, 4, 5, 6, 7, 8], { min: 3 });
-    h += `<div class="lsub" data-jz="bolts">Śruby</div>` + fSel(q + '.d', 'Średnica', BOLTS()) + fSel(q + '.kl', 'Klasa', BKL()) + (fin ? fNum(q + '.n', 'Liczba śrub n', 'szt.', [2, 3, 4, 5, 6, 7, 8], { min: 1 }) : fNum(q + '.nr', 'Liczba rzędów (2 śruby w rzędzie)', 'szt.', [1, 2, 3, 4, 5, 6], { min: 1 }))
-      + fNum(q + '.e1', 'Odległość od krawędzi e_{1}', 'mm', [30, 35, 40, 45, 50, 60], { min: 10 }) + fNum(q + '.p1', 'Rozstaw pionowy p_{1}', 'mm', [55, 60, 70, 80, 90, 100], { min: 20 }) + fNum(q + '.e2', 'Odległość boczna e_{2}', 'mm', [25, 30, 35, 40, 45, 50], { min: 10 })
-      + (fin ? fNum(q + '.z', 'Mimośród z (lico podpory – oś śrub)', 'mm', [40, 50, 60, 70, 80, 100], { min: 10 }) + fNum(q + '.e2b', 'Oś śrub – koniec belki e_{2,b}', 'mm', [30, 35, 40, 50], { min: 10 }) : fNum(q + '.p3', 'Rozstaw poziomy śrub p_{3}', 'mm', [60, 70, 80, 90, 100, 110, 120], { min: 20 }))
-      + fChk(q + '.gwint', 'Płaszczyzna ścinania przez gwint');
-    h += `<div class="lsub" data-jz="sup">Element podpierający (docisk śrub)</div>` + fNum(q + '.tsup', 'Grubość ścianki podpory t', 'mm', [6, 8, 10, 12, 15, 20], { min: 3 }) + fNum(q + '.fusup', 'f_{u} materiału podpory', 'MPa', [360, 470, 490, 510], { min: 200 });
+  if (!designer && ['blacha_czolowa', 'blacha_zebrowa', 'katowniki', 'spawane'].includes(w.typ)) {
+    h += `<div class="lsub" data-jz="plate">Połączenie</div><p class="hint" style="margin:2px 0 6px">${esc(J.jointTxt(w, sec))}.</p><div class="row wide"><span></span><button class="btn pri sm" data-jdes="${i}" type="button">Projektowanie połączenia…</button></div>`;
   }
   return h;
 }
+A.jointFields = jointFields;
 A.supportPopup = function (i, focus) {
   const m = $('#modal');
   const live = () => {
     const r = R(); if (!r || !r.md) return;
     const p = r.md.sup[i], rp = (r.podpory || []).find(q => q.id === (p && p.id)), sk = $('#spSk', m), ck = $('#spCk', m), rr = $('#spR', m);
-    if (sk && r.sec) { sk.innerHTML = D.joint(r.sec, S().podpory[i].wezel || {}, { W: 330, H: 250 }); Q.themeSvgIn(sk); bindSketch(); }
+    if (sk && r.sec) { const w0 = S().podpory[i].wezel || {}; sk.innerHTML = rp && rp.pol ? D.jointViews(r.sec, w0, rp.pol, { W: 350, H: 280 }).elev : D.joint(r.sec, w0, { W: 330, H: 250 }); Q.themeSvgIn(sk); bindSketch(); }
     if (ck) { ck.innerHTML = rp ? checksHTML(rp.checks) : '<p class="hint">Brak wyników (błąd danych).</p>'; bindNref(ck); }
     if (rr && rp) rr.innerHTML = `R<sub>Ed,max</sub> = <b>${fmt(rp.Rmax / 1e3, 1)} kN</b>${rp.Mmax > 1e3 ? ` · |M<sub>Ed</sub>| = ${fmt(rp.Mmax / 1e6, 1)} kNm` : ''} · reakcje charakterystyczne: ${rp.Rk.map(q => `${esc(q.id)} ${fmt(q.R / 1e3, 1)} kN`).join(', ')}`;
   };
-  const bindSketch = () => { const sk = $('#spSk', m); if (!sk) return; sk.style.cursor = 'pointer'; sk.title = 'Kliknij blachę, śruby lub żebro – przejście do wymiarów'; sk.onclick = (ev) => { const r2 = sk.getBoundingClientRect(), x = ev.clientX - r2.left, y = ev.clientY - r2.top; const z = x < r2.width * 0.42 ? (y > r2.height * 0.75 ? 'sup' : 'plate') : 'bolts'; const t = $(`[data-jz="${z}"]`, m) || $('[data-jz]', m); if (t) { t.scrollIntoView({ block: 'center' }); Q.hlg(t.nextElementSibling || t); } }; };
+  const bindSketch = () => { const sk = $('#spSk', m); if (!sk) return; if (['blacha_czolowa', 'blacha_zebrowa', 'katowniki', 'spawane'].includes((S().podpory[i].wezel || {}).typ)) { sk.style.cursor = 'pointer'; sk.title = 'Kliknij – okno projektowania połączenia'; sk.onclick = () => A.jointDesigner({ sup: i }); return; } sk.style.cursor = 'pointer'; sk.title = 'Kliknij blachę, śruby lub żebro – przejście do wymiarów'; sk.onclick = (ev) => { const r2 = sk.getBoundingClientRect(), x = ev.clientX - r2.left, y = ev.clientY - r2.top; const z = x < r2.width * 0.42 ? (y > r2.height * 0.75 ? 'sup' : 'plate') : 'bolts'; const t = $(`[data-jz="${z}"]`, m) || $('[data-jz]', m); if (t) { t.scrollIntoView({ block: 'center' }); Q.hlg(t.nextElementSibling || t); } }; };
   const draw = () => {
     const st = S(), r = R(); if (!r || !r.md || !st.podpory[i]) { closeM(); return; }
     const p = st.podpory[i], sp = r.md.sup[i], q = `podpory.${i}`;
@@ -214,13 +211,14 @@ A.supportPopup = function (i, focus) {
     h += fNum(q + '.ss', 'Długość docisku s_{s}', 'mm', [0, 50, 80, 100, 120, 150, 200], { min: 0 }) + fNum(q + '.c', 'Odległość docisku od końca belki c', 'mm', [0, 10, 20, 30, 50, 80, 100], { min: 0 });
     h += jointFields(i);
     h += `</div><div><div id="spSk" class="fig" style="margin:0"></div><p class="hint" style="margin:0 0 4px">Kliknij blachę, śruby lub podporę na rysunku – przejście do wymiarów.</p><p id="spR" class="hint"></p></div></div><div class="lsub">Sprawdzenia podpory (na bieżąco)</div><div id="spCk"></div>`;
-    h += `<div class="dbtn"><button class="btn" id="spAuto" type="button" title="Dobór oparcia / połączenia tej podpory dla obecnej reakcji (wytężenie ≤ η z paska doboru)">⚙ Dobierz połączenie</button><span class="sp"></span>${i > 0 ? '<button class="btn" id="spPrev" type="button">◀ poprzednia</button>' : ''}${i < st.podpory.length - 1 ? '<button class="btn" id="spNext" type="button">następna ▶</button>' : ''}<button class="btn pri" id="nClose" type="button">Zamknij</button></div></div>`;
+    h += `<div class="dbtn"><button class="btn" id="spDes" type="button" title="Osobne okno: rodzaj połączenia, blachy, kątowniki, śruby, spoiny, rysunki i pełne sprawdzenia">Projektowanie połączenia…</button><button class="btn" id="spAuto" type="button" title="Dobór oparcia / połączenia tej podpory dla obecnej reakcji (wytężenie ≤ η z paska doboru)">⚙ Dobierz połączenie</button><span class="sp"></span>${i > 0 ? '<button class="btn" id="spPrev" type="button">◀ poprzednia</button>' : ''}${i < st.podpory.length - 1 ? '<button class="btn" id="spNext" type="button">następna ▶</button>' : ''}<button class="btn pri" id="nClose" type="button">Zamknij</button></div></div>`;
     const keep = $('.dlg.suppop', m) ? $('.dlg.suppop', m).scrollTop : 0;
     m.innerHTML = h; m.style.display = 'flex'; $('.dlg.suppop', m).scrollTop = keep;
     if (window.innerWidth < 760) $('.spgrid', m).style.gridTemplateColumns = '1fr';
     A.bindFields(m, (re) => { if (re) draw(); });
-    $$('select[data-k$=".wezel.typ"]', m).forEach(sel => sel.addEventListener('change', () => { const p0 = S().podpory[i], t = p0.wezel.typ; p0.wezel = Object.assign({ typ: t }, JDEF(t, R().sec && R().sec.h)); A.recalcNow(); draw(); }));
-    $('#nClose', m).onclick = closeM;
+    $$('select[data-k$=".wezel.typ"]', m).forEach(sel => sel.addEventListener('change', () => { const p0 = S().podpory[i], t = p0.wezel.typ; p0.wezel = Object.assign({ typ: t }, BS.W.defaults(t, R().sec)); A.recalcNow(); draw(); }));
+    $$('[data-jdes]', m).forEach(b2 => b2.addEventListener('click', () => A.jointDesigner({ sup: i })));
+    $('#nClose', m).onclick = closeM; $('#spDes', m).onclick = () => A.jointDesigner({ sup: i });
     const pv = $('#spPrev', m), nx = $('#spNext', m); if (pv) pv.onclick = () => A.supportPopup(i - 1); if (nx) nx.onclick = () => A.supportPopup(i + 1);
     $('#spAuto', m).onclick = () => {
       const eta = ((S().design && S().design.eta) || 100) / 100, r0 = J.run(S());
@@ -356,13 +354,14 @@ A.nodePopup = function (x) {
     <table class="kv"><tr><td>M<sub>Ed</sub> (obwiednia SGN, etap ${s + 1})</td><td class="n"><b>${fmt(at(ev.Mmax) / 1e6, 2)} / ${fmt(at(ev.Mmin) / 1e6, 2)}</b> kNm</td></tr><tr><td>V<sub>Ed</sub></td><td class="n"><b>${fmt(at(ev.Vmax) / 1e3, 2)} / ${fmt(at(ev.Vmin) / 1e3, 2)}</b> kN</td></tr><tr><td>ugięcie (char.)</td><td class="n"><b>${fmt(at(ev.wmax), 2)}</b> mm</td></tr></table>
     <h4 class="lsec">Dodaj w tym miejscu</h4>
     <div class="zg"><span>Siła skupiona P</span><input class="txt" id="ndP" value="10"><span>kN do przypadku</span><select id="ndC">${cases.map(([i, l]) => `<option value="${i}">${esc(l.slice(0, 40))}</option>`).join('')}<option value="new">nowy przypadek (Q)</option></select><button class="btn sm" id="ndAddP" type="button">Dodaj siłę</button></div>
-    <div class="zg"><button class="btn sm" id="ndBr" type="button">+ stężenie boczne pasa górnego</button><button class="btn sm" id="ndTs" type="button" ${S().etapy.length < 2 ? 'disabled title="Wymaga co najmniej dwóch etapów"' : ''}>+ podpora montażowa</button></div>
+    <div class="zg"><button class="btn sm" id="ndBr" type="button">+ stężenie boczne pasa górnego</button><button class="btn sm" id="ndTs" type="button" ${S().etapy.length < 2 ? 'disabled title="Wymaga co najmniej dwóch etapów"' : ''}>+ podpora montażowa</button><button class="btn sm" id="ndSp" type="button">+ styk montażowy</button></div>
     <div class="dbtn"><button class="btn pri" id="nClose" type="button">Zamknij</button></div>`, 'fpop sm');
   const X = +(x / 1000).toFixed(3);
   $('#nClose', m).onclick = closeM;
   $('#ndAddP', m).onclick = () => { const P0 = parseNum($('#ndP', m).value); if (P0 === null) { $('#ndP', m).classList.add('bad'); return; } const c = $('#ndC', m).value, st = S(); if (c === 'new') st.obciazenia.push({ id: nextId('Q'), nazwa: `Siła skupiona x = ${showNum(X)} m`, rodzaj: 'Q', kat: 'Q-B', etap: md.nE - 1, uklad: 'staly', wyklucz: '', N: 0, sklad: [{ typ: 'P', P: P0, x: X, kier: 'z', wys: 'pas_g', ss: 0 }] }); else st.obciazenia[+c].sklad.push({ typ: 'P', P: P0, x: X, kier: 'z', wys: 'pas_g', ss: 0 }); closeM(); A.changed(true); };
   $('#ndBr', m).onclick = () => { S().stezenia.push({ x: X, typ: 'boczne', wys: 'pas_g', odEtapu: 0, bocznieY: true }); closeM(); A.changed(true); };
   $('#ndTs', m).onclick = () => { S().podporyTymczasowe.push({ x: X, usunietaPo: 0, ss: 100 }); closeM(); A.changed(true); };
+  $('#ndSp', m).onclick = () => { closeM(); A.addSplice(X); };
 };
 
 /* ================================================================ SCHEMATY TYPOWE */
@@ -400,7 +399,8 @@ A.gotoCheck = function (c) {
   const go = (tab, fn) => { closeM(); A.selectTab(tab); setTimeout(() => { try { fn && fn(); } catch (e) { console.error(e); } }, 90); };
   const hl = (sel) => Q.hlg(sel);
   const supI = () => { const r = R(); const sid = (/podpora (\S+)/.exec(grp) || [])[1] || id.split('-')[0]; const i = r.md.sup.findIndex(p => p.id === sid); return i; };
-  if (/^Podpory/.test(grp)) { const i = supI(); if (i < 0) return go('elev', () => hl('#p-elev .elevbox')); const foc = /-B\d/.test(id) ? 'plate' : /-C\d|-D/.test(id) ? (/[Śś]rub|docisk|ścięc|rozerw|blokow/i.test(c.n) ? 'bolts' : 'plate') : /-Z/.test(id) ? 'stiff' : null; return go('elev', () => A.supportPopup(i, foc)); }
+  if (/^Podpory/.test(grp)) { const i = supI(); if (i < 0) return go('elev', () => hl('#p-elev .elevbox')); if (/-C\d|-D\d|-Z\d/.test(id)) return go('elev', () => A.jointDesigner({ sup: i })); const foc = /-B\d/.test(id) ? 'plate' : /-ZB|-ZD|-ZC/.test(id) ? 'stiff' : null; return go('elev', () => A.supportPopup(i, foc)); }
+  if (/^Styki/.test(grp)) { const j = +((/S(\d+)/.exec(id) || [])[1] || 1) - 1; return go('elev', () => A.jointDesigner({ styk: j })); }
   if (/-LT\d|-I\d/.test(id)) return go('ltb', () => hl(`#p-ltb tr[data-cid="${esc(id)}"]`) || hl('#p-ltb .card'));
   if (/^SGU – ugięcia/.test(grp)) return go('data', () => hl(['#inputs [data-k="sgu.wmax"]', '#inputs [data-k="sgu.w3"]', '#inputs [data-k="sgu.podniesienie"]']));
   if (/^SGU – drgania/.test(grp)) return go('data', () => hl(['#inputs [data-k="sgu.fmin"]', '[data-ck="sgu.drgania"]']));

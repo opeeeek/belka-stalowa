@@ -3,7 +3,13 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 const BS = require('./_load.js');
-for (const f of ['rysunki', 'widoki', 'raport']) require(path.join(__dirname, '..', 'src', 'ui', f + '.js'));
+// minimalne środowisko przeglądarki dla modułów rysunków i raportu (generują tekst SVG/HTML)
+globalThis.window = globalThis;
+const noop = () => {};
+globalThis.document = { addEventListener: noop, documentElement: {}, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null };
+globalThis.MutationObserver = class { observe() {} };
+globalThis.addEventListener = noop;
+for (const f of ['baza', 'rysunki', 'rys_wezly', 'raport']) require(path.join(__dirname, '..', 'src', 'ui', f + '.js'));
 const { J } = BS;
 
 function zlozony() {
@@ -33,8 +39,13 @@ test('raport i widoki – projekt domyślny', () => {
   const st = J.defaultState(), r = J.run(st);
   const h = BS.Raport.build(st, r);
   assert.ok(h.includes('Podstawa normowa') && h.includes(r.hash) && h.includes('Wymagania wykonawcze'));
-  for (const v of ['sec', 'chart', 'ltb', 'sup', 'sum']) assert.ok(BS.V[v](st, r, { etap: 1, stageSeg: '' }).length > 100, v);
   assert.ok(!/NaN|undefined/.test(h.replace(/"[^"]*"/g, '')), 'brak NaN/undefined w treści raportu');
+  const hs = BS.Raport.buildStatic(st, r);
+  assert.ok(hs.includes('Wykresy sił wewnętrznych') && !/NaN|undefined/.test(hs.replace(/"[^"]*"/g, '')), 'raport statyki');
+  const jb = BS.Raport.jointBlock(st, r, { sup: 0 });
+  assert.ok(jb.includes('Rozerwanie blokowe') && jb.includes('<svg'), 'tok obliczeń połączenia');
+  const ex = BS.Raport.explain(st, r, r.checks.find(c => c.id === '1-M'));
+  assert.ok(ex.includes('M<sub>c,Rd</sub>'), 'jak obliczono – zginanie');
 });
 
 test('raport – przypadek złożony (2. generacja → 1., etapy, kl. 4, pożar, zmęczenie, połączenia)', () => {
@@ -42,9 +53,22 @@ test('raport – przypadek złożony (2. generacja → 1., etapy, kl. 4, pożar,
   assert.equal(r.errors.length, 0, r.errors.join('; '));
   assert.equal(r.norm.genStosowana, 1);
   const h = BS.Raport.build(st, r);
-  assert.ok(h.includes('Nośność w warunkach pożaru') && h.includes('Zmęczenie') && h.includes('Blacha żebrowa'));
+  assert.ok(h.includes('Nośność w warunkach pożaru') && h.includes('Zmęczenie') && h.includes('blacha żebrowa'));
   assert.ok(/zastosowano|zestaw 1\. generacji|1\. generacji z załącznikami/.test(h));
   const bad = h.replace(/"[^"]*"/g, '').match(/.{40}(NaN|undefined).{40}/);
   assert.ok(!bad, 'NaN/undefined: ' + (bad && bad[0]));
-  for (const v of ['sec', 'chart', 'ltb', 'sup', 'sum']) for (const e of [0, 1]) BS.V[v](st, r, { etap: e, stageSeg: '' });
+});
+
+test('raport – połączenia wszystkich rodzajów i styki', () => {
+  const st = J.defaultState();
+  st.podpory[0].wezel = Object.assign({ typ: 'katowniki' }, BS.W.defaults('katowniki'));
+  st.podpory[1].wezel = Object.assign({ typ: 'spawane' }, BS.W.defaults('spawane'), { spoiny: 'obwodowe' });
+  st.styki = [BS.W.spliceDefaults(null, 2), Object.assign(BS.W.spliceDefaults(null, 4), { typ: 'spawany' })];
+  const r = J.run(st), h = BS.Raport.build(st, r);
+  assert.equal(r.errors.length, 0, r.errors.join('; '));
+  assert.ok(h.includes('Styki montażowe') && h.includes('Kątowniki') && h.includes('Spoina czołowa'));
+  const bad = h.replace(/"[^"]*"/g, '').match(/.{40}(NaN|undefined).{40}/);
+  assert.ok(!bad, 'NaN/undefined: ' + (bad && bad[0]));
+  const to = BS.Raport.takeoff(st, r);
+  assert.ok(to.rows.some(q => /Kątowniki/.test(q.n)) && to.rows.some(q => /nakładki pasów/.test(q.n)) && to.total > 0);
 });

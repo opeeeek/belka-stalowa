@@ -760,3 +760,36 @@ svg.elev .xend { cursor: ew-resize; } svg.elev .xend circle { stroke-width: 1.4;
 :root[data-theme="dark"] { --sv-0b7285: #59d6ed; --sv-0e8fa8: #59d5ed; --sv-155e2c: #6cdb8f; --sv-163f86: #6592e2; --sv-1b2230: #b8c2d7; --sv-1d2a3f: #aebcd3; --sv-1d3f78: #6e96d8; --sv-1d5bb8: #6497e3; --sv-1d7f3c: #6cda8f; --sv-1f8a4c: #6cda9a; --sv-39414f: #a2acbc; --sv-3b5b8f: #8197bb; --sv-3d4656: #9ca7b9; --sv-4a5466: #909bae; --sv-4f5868: #919aab; --sv-5aa469: #85ad8d; --sv-5b6576: #8c96a6; --sv-5d6778: #8c96a6; --sv-5d7a2e: #adcb7c; --sv-6a3fb5: #9879cd; --sv-6b7584: #8e97a4; --sv-7a8494: #8e96a4; --sv-7fa3e0: #81a4de; --sv-8a2027: #da6d74; --sv-8a2f2f: #ce7878; --sv-9aa3b0: #9aa3b0; --sv-9aa3b2: #9aa3b2; --sv-9b1c22: #e0676c; --sv-a04848: #ad8585; --sv-a35d00: #fab04c; --sv-a6c76a: #afcb7c; --sv-aab2bf: #424a57; --sv-b4bac4: #434a56; --sv-b5651d: #e2a064; --sv-b597ee: #b699ec; --sv-c0262d: #de696e; --sv-c9ced6: #373d48; --sv-c9d4e6: #28354a; --sv-cfd3d9: #353b43; --sv-cfd4db: #333a44; --sv-e08a8a: #de8c8c; --sv-e6a35a: #e3a663; --sv-e6b3b3: #e5b4b4; --sv-eceef1: #21262d; --sv-eef0f3: #1f242b; --sv-f1f2f4: #1f2228; --sv-f3f4f6: #1d2027; --sv-ffffff: #151b24; }
 @media print { :root:not([data-print]) { --sv-0b7285: #0b7285; --sv-0e8fa8: #0e8fa8; --sv-155e2c: #155e2c; --sv-163f86: #163f86; --sv-1b2230: #1b2230; --sv-1d2a3f: #1d2a3f; --sv-1d3f78: #1d3f78; --sv-1d5bb8: #1d5bb8; --sv-1d7f3c: #1d7f3c; --sv-1f8a4c: #1f8a4c; --sv-39414f: #39414f; --sv-3b5b8f: #3b5b8f; --sv-3d4656: #3d4656; --sv-4a5466: #4a5466; --sv-4f5868: #4f5868; --sv-5aa469: #5aa469; --sv-5b6576: #5b6576; --sv-5d6778: #5d6778; --sv-5d7a2e: #5d7a2e; --sv-6a3fb5: #6a3fb5; --sv-6b7584: #6b7584; --sv-7a8494: #7a8494; --sv-7fa3e0: #7fa3e0; --sv-8a2027: #8a2027; --sv-8a2f2f: #8a2f2f; --sv-9aa3b0: #9aa3b0; --sv-9aa3b2: #9aa3b2; --sv-9b1c22: #9b1c22; --sv-a04848: #a04848; --sv-a35d00: #a35d00; --sv-a6c76a: #a6c76a; --sv-aab2bf: #aab2bf; --sv-b4bac4: #b4bac4; --sv-b5651d: #b5651d; --sv-b597ee: #b597ee; --sv-c0262d: #c0262d; --sv-c9ced6: #c9ced6; --sv-c9d4e6: #c9d4e6; --sv-cfd3d9: #cfd3d9; --sv-cfd4db: #cfd4db; --sv-e08a8a: #e08a8a; --sv-e6a35a: #e6a35a; --sv-e6b3b3: #e6b3b3; --sv-eceef1: #eceef1; --sv-eef0f3: #eef0f3; --sv-f1f2f4: #f1f2f4; --sv-f3f4f6: #f3f4f6; --sv-ffffff: #ffffff; } }
 #report { --sv-0b7285: #0b7285; --sv-0e8fa8: #0e8fa8; --sv-155e2c: #155e2c; --sv-163f86: #163f86; --sv-1b2230: #1b2230; --sv-1d2a3f: #1d2a3f; --sv-1d3f78: #1d3f78; --sv-1d5bb8: #1d5bb8; --sv-1d7f3c: #1d7f3c; --sv-1f8a4c: #1f8a4c; --sv-39414f: #39414f; --sv-3b5b8f: #3b5b8f; --sv-3d4656: #3d4656; --sv-4a5466: #4a5466; --sv-4f5868: #4f5868; --sv-5aa469: #5aa469; --sv-5b6576: #5b6576; --sv-5d6778: #5d6778; --sv-5d7a2e: #5d7a2e; --sv-6a3fb5: #6a3fb5; --sv-6b7584: #6b7584; --sv-7a8494: #7a8494; --sv-7fa3e0: #7fa3e0; --sv-8a2027: #8a2027; --sv-8a2f2f: #8a2f2f; --sv-9aa3b0: #9aa3b0; --sv-9aa3b2: #9aa3b2; --sv-9b1c22: #9b1c22; --sv-a04848: #a04848; --sv-a35d00: #a35d00; --sv-a6c76a: #a6c76a; --sv-aab2bf: #aab2bf; --sv-b4bac4: #b4bac4; --sv-b5651d: #b5651d; --sv-b597ee: #b597ee; --sv-c0262d: #c0262d; --sv-c9ced6: #c9ced6; --sv-c9d4e6: #c9d4e6; --sv-cfd3d9: #cfd3d9; --sv-cfd4db: #cfd4db; --sv-e08a8a: #e08a8a; --sv-e6a35a: #e6a35a; --sv-e6b3b3: #e6b3b3; --sv-eceef1: #eceef1; --sv-eef0f3: #eef0f3; --sv-f1f2f4: #f1f2f4; --sv-f3f4f6: #f3f4f6; --sv-ffffff: #ffffff; }
+/* ---------- okno projektowania połączeń ---------- */
+.dlg.jdes { max-width: none !important; width: min(1500px, 98vw); height: 95vh; max-height: 95vh; display: flex; flex-direction: column; padding: 10px 14px 12px; overflow: hidden; }
+.jdes .jhead { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-bottom: 6px; border-bottom: 1px solid var(--line); margin-bottom: 6px; }
+.jdes .jhead .sp { flex: 1; }
+.jdes .jtabs { margin: 0 0 6px; }
+.jdes .jtabs .btab { height: auto; min-height: 26px; padding: 3px 8px; }
+.jdes .jtabs .btab span { max-width: 170px; }
+.jdes .jtabs .btab i.ok { color: var(--ok); } .jdes .jtabs .btab i.fail { color: var(--fail); }
+.jdes .jtabs .btab.on i.ok, .jdes .jtabs .btab.on i.fail { color: var(--onacc); }
+.jdes .jbody { flex: 1; min-height: 0; display: grid; grid-template-columns: 350px minmax(0, 1fr) 440px; gap: 12px; }
+.jdes .jcol { overflow: auto; min-height: 0; padding-right: 2px; }
+.jdes .jcol.fields { padding: 0 4px 0 0; }
+.jdes .jtypes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 4px 0 8px; }
+.jdes .jtype { display: flex; flex-direction: column; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 4px 2px; font: 500 11px var(--ui); color: var(--ink2); cursor: pointer; }
+.jdes .jtype:hover:not([disabled]) { border-color: var(--acc); }
+.jdes .jtype.on { border-color: var(--acc); box-shadow: 0 0 0 2px color-mix(in srgb, var(--acc) 35%, transparent); color: var(--ink); }
+.jdes .jtype[disabled] { opacity: .4; cursor: not-allowed; }
+.jdes .jviews { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+.jdes .jview { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 4px; max-width: 100%; overflow: auto; }
+.jdes .jview svg { display: block; max-width: 100%; height: auto; }
+.jz:hover > rect, .jz:hover > path, .jz:hover > circle { filter: brightness(0.9) saturate(1.3); }
+.jdes .jsum { border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; font-size: 12.5px; line-height: 1.5; border: 1px solid var(--line); }
+.jdes .jsum.ok { background: var(--okbg); } .jdes .jsum.fail { background: var(--failbg); } .jdes .jsum.warn { background: var(--warnbg); }
+.jdes .jck td { vertical-align: top; }
+.jdes .jck tr.jf td { font-size: 11.5px; color: var(--ink2); background: var(--itembg); line-height: 1.5; }
+.jdes tr.failrow td { background: var(--failbg); } .jdes tr.warnrow td { background: var(--warnbg); }
+.jsvg { background: var(--panel); }
+@media (max-width: 1150px) { .dlg.jdes { height: auto; max-height: 96vh; overflow: auto; } .jdes .jbody { grid-template-columns: 1fr; } .jdes .jcol { overflow: visible; } }
+.xrep .eq { padding: 2px 0 2px 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.xrep .eq .r { margin-left: 8px; font-size: 11px; color: var(--ink3); }
+.xrep .ok { color: var(--ok); font-weight: 700; } .xrep .fail { color: var(--fail); font-weight: 700; } .xrep .warn { color: var(--warn); font-weight: 700; }
+.xrep .note { font-size: 11.5px; font-style: italic; color: var(--ink2); }
+.xrep .fig { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0; overflow-x: auto; }

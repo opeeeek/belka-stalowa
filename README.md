@@ -49,10 +49,15 @@ Aplikacja do analizy i projektowania belek stalowych według Eurokodów, przygot
 - Ugięcia w<sub>max</sub> i w<sub>3</sub> oraz przemieszczenie poziome.
 - Pierwsza częstotliwość drgań własnych (MES).
 
-**Podpory i połączenia (PN-EN 1993-1-8)**
-- Docisk środnika i żebra podporowe.
-- Płyta podporowa na betonie lub murze.
-- Krótka blacha czołowa i blacha żebrowa: śruby, docisk, rozerwanie blokowe, spoiny, rozmieszczenie łączników.
+**Podpory i połączenia (PN-EN 1993-1-8) – osobne okno „Projektowanie połączeń”**
+- Oparcia: docisk środnika, żebra podporowe, płyta podporowa na betonie lub murze.
+- Połączenia podporowe: blacha czołowa (krótka lub pełnej wysokości), blacha żebrowa (1–2 kolumny śrub, mimośród grupy, zginanie i zwichrzenie długiej blachy), kątowniki podwójne (śruby dwucięte w środniku, jednocięte w podporze; katalog L i LN), połączenie spawane (spoiny środnika, obwodowe, czołowa z pełnym przetopem).
+- Styki montażowe belki w dowolnym miejscu: nakładkowy śrubowy (nakładki pasów zewnętrzne i wewnętrzne, nakładki środnika, podział M na pasy i środnik, kategorie A/B/C) oraz spawany czołowy.
+- Śruby M12–M30, klasy 4.6–10.9, otwory normalne lub powiększone, gwint lub trzpień w płaszczyźnie ścinania, śruby sprężane i poślizg (3.9), długie złącza β<sub>Lf</sub> (3.8), przebicie B<sub>p,Rd</sub>, nośność grupy (3.7).
+- Docisk w dwóch kierunkach z interakcją dla każdej śruby grupy mimośrodowej, rozerwanie blokowe (3.10.2), ścinanie brutto i netto, T-króciec (6.2.4) przy sile wiązania, spoiny metodą kierunkową (4.5.3.2) i spoiny pełnonośne.
+- Element podpierający (pas / środnik słupa, środnik podciągu, blacha): docisk, ścinanie lokalne, przebicie; podcięcia belki (ścinanie, zginanie przekroju podciętego, rozerwanie blokowe).
+- Rozmieszczenie łączników (tabl. 3.3) jako warunki; zalecenia SCI P358 (ciągliwość t<sub>p</sub> ≤ 0,5d, e<sub>2</sub> ≥ 2d, h<sub>p</sub> ≥ 0,6h, dostęp klucza) jako uwagi.
+- Rysunki w skali (widok z boku i z czoła / z góry, numeracja śrub, kolor wg wytężenia, łańcuchy wymiarowe), klikane elementy prowadzą do parametrów; tok obliczeń każdego sprawdzenia; dobór automatyczny najtańszego wariantu.
 
 **Moduły dodatkowe**
 - Pożar (PN-EN 1993-1-2): θ<sub>cr</sub>, nagrzewanie wg ISO 834, zabezpieczenie ogniochronne.
@@ -60,8 +65,13 @@ Aplikacja do analizy i projektowania belek stalowych według Eurokodów, przygot
 - Kruche pękanie i klasy Z (PN-EN 1993-1-10).
 - Klasa wykonania EXC i wymagania wykonawcze (PN-EN 1090-2).
 
+**Interfejs (jak w BelkaŻB / SłupŻB)**
+- Klikany schemat statyczny: lewy przycisk – zaznaczanie przęseł, prawy – menu (obciążenia, przekrój, stężenia, połączenia, styki, podpora), dwuklik – siła, stężenie, podpora montażowa lub styk w tym miejscu; legenda obciążeń z polami wyboru (uwzględnij / pomiń), wykres M / V / ugięcia / N / R pod schematem.
+- Chipy sprawdzeń nad danymi i wynikami (klik – miejsce w Podsumowaniu), przyciski „Dobierz przekrój”, „Dobierz połączenia”, „Dobierz wszystko” z wymaganym wytężeniem.
+- Schematy typowe, wiele belek w projekcie, przekrój z klikanymi strefami, wykresy z kursorem i znacznikami wartości, Podsumowanie z odhaczaniem, objaśnieniami punktów norm i przejściem „pokaż →”.
+
 **Inne funkcje**
-- Dobór kształtownika: program wybiera najlżejszy kształtownik z serii IPE, HEA, HEB lub HEM, który spełnia wszystkie warunki.
+- Dobór kształtownika: najlżejszy kształtownik tego samego rodzaju i serii (IPE, HEA, HEB, HEM, UPN, UPE, L, SHS, RHS) albo grubości blach dwuteownika spawanego, spełniające warunki elementu.
 - Kalkulator śniegu dla stref obciążenia śniegiem z ZK PL.
 
 ## Profil normowy projektu
@@ -105,7 +115,7 @@ Raport zawiera kolejno:
 11. Wymagania wykonawcze (EXC, spawanie, NDT, tolerancje, korozja, montaż).
 12. Zestawienie wyników, ograniczenia modelu i dane do odtworzenia.
 
-Raport można wydrukować lub zapisać do PDF (Ctrl+P) albo zapisać jako plik HTML.
+Rodzaje raportu (jak w BelkaŻB): **raport pełny**, **statyka** (dane, schemat, obciążenia, wykresy sił wewnętrznych, reakcje) oraz **raport własny** – edytowalny (pisanie, usuwanie fragmentów, wstawianie aktualnego raportu pełnego lub statyki). Raport można wydrukować lub zapisać do PDF (Ctrl+P), zapisać jako plik HTML (z danymi projektu) lub jako edytowalny dokument OpenDocument (.odt). Opcjonalnie bez odwołań do punktów norm.
 
 ## Budowa i testy
 
@@ -132,7 +142,9 @@ Testy porównują wyniki z rozwiązaniami zamkniętymi i danymi katalogowymi. Sz
 - EQU, temperaturę krytyczną z (4.22),
 - spójność tablicy 2.1 z PN-EN 1993-1-10,
 - profil normowy i zakaz mieszania generacji,
-- SHA-256 (wektory FIPS).
+- SHA-256 (wektory FIPS),
+- połączenia: F<sub>v,Rd</sub>, F<sub>t,Rd</sub>, F<sub>s,Rd</sub>, F<sub>b,Rd</sub>, β<sub>Lf</sub>, siły w grupie mimośrodowej, spoiny metodą kierunkową, rozerwanie blokowe, podział sił w styku (obliczenia ręczne); dobór wszystkich rodzajów połączeń,
+- raport pełny, statyki i tok obliczeń połączeń bez wartości NaN.
 
 ## Struktura
 
@@ -147,10 +159,13 @@ src/engine/   silnik (bez DOM; działa w przeglądarce i w Node)
   kombinacje.js  kombinacje PN-EN 1990, EQU
   nosnosc.js     klasyfikacja, przekrój efektywny, M/V/N, PN-EN 1993-1-5
   statecznosc.js zwichrzenie, 6.3.1, 6.3.3
-  polaczenia.js  oparcia, blacha czołowa, blacha żebrowa
+  polaczenia.js  oparcia (płyta podporowa), funkcje pomocnicze śrub
+  wezly.js       połączenia i styki wg PN-EN 1993-1-8 (+ SCI P358), dobór
   dodatkowe.js   pożar, zmęczenie, kruche pękanie, EXC
   projekt.js     stan domyślny, przebieg obliczeń, SGU, podpory, dobór
-src/ui/       interfejs: app.css, index.html, app.js, widoki.js, rysunki.js, raport.js
+src/ui/       interfejs: app.css, index.html, baza.js (narzędzia), app.js (dane, schemat, pliki),
+              okna.js (okna dialogowe), projektant.js (projektowanie połączeń), widoki.js (zakładki),
+              rysunki.js, rys_wezly.js (rysunki), raport.js, odt.js (eksport .odt), objasnienia.js
 host/         aplikacja okienkowa Windows (Go + WebView2)
 test/         testy weryfikacyjne (node:test)
 ```

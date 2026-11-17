@@ -122,6 +122,8 @@ D.scheme = function (S, R, o) {
     const act = z.od <= s, x = X(z.x), yy = z.wys === 'pas_d' ? yBeam + 6 : z.wys === 'srodek' ? yBeam : yBeam - 6, col = act ? '#1d5bb8' : '#9aa3b0';
     g += `<g class="${o.edit ? 'rst' : ''}" data-rst="${z.src}" opacity="${act ? 1 : 0.45}"><title>Stężenie ${z.typ} x = ${fmt(z.x / 1000, 2)} m (od etapu ${z.od + 1})</title><circle cx="${x}" cy="${yy}" r="6" fill="#ffffff" fill-opacity="0"/><circle cx="${x}" cy="${yy}" r="4.2" fill="#ffffff" stroke="${col}" stroke-width="1.6"/>${z.typ !== 'boczne' ? `<line x1="${x - 3}" y1="${yy - 3}" x2="${x + 3}" y2="${yy + 3}" stroke="${col}" stroke-width="1.4"/><line x1="${x - 3}" y1="${yy + 3}" x2="${x + 3}" y2="${yy - 3}" stroke="${col}" stroke-width="1.4"/>` : `<circle cx="${x}" cy="${yy}" r="1.4" fill="${col}"/>`}</g>`;
   });
+  // styki montażowe
+  (S.styki || []).forEach((st2, j) => { const x = X(U.clamp(U.num(st2.x) * 1000, 0, L)); g += `<g class="${o.edit ? 'sty' : ''}" data-sty="${j}"${o.edit ? ' style="cursor:pointer"' : ''}><title>Styk montażowy S${j + 1} – x = ${fmt(U.num(st2.x), 2)} m</title><rect x="${x - 7}" y="${yBeam - 14}" width="14" height="28" fill="#ffffff" fill-opacity="0"/><line x1="${x - 2.5}" y1="${yBeam - 9}" x2="${x - 2.5}" y2="${yBeam + 9}" stroke="#b5651d" stroke-width="1.6"/><line x1="${x + 2.5}" y1="${yBeam - 9}" x2="${x + 2.5}" y2="${yBeam + 9}" stroke="#b5651d" stroke-width="1.6"/>${tx(x, yBeam - 12, 'S' + (j + 1), { fs: 9, w: 700, c: '#b5651d' })}</g>`; });
   // opis przekroju
   if (R.sec) { const sp0 = md.seg.find(z => !z.wsp) || md.seg[0]; g += tx(X((sp0.x0 + sp0.x1) / 2), yBeam + 14, esc(`${R.sec.nazwa} · ${S.material.gatunek}${S.material.podgatunek}`), { fs: 10, c: '#4a5466' }); }
   let y = yBeam + 46;
@@ -408,6 +410,13 @@ D.elevation = function (S, R, o) {
       d += `<rect x="${side < 0 ? x - tp : x}" y="${ym - hp / 2}" width="${tp}" height="${hp}" fill="#b5651d" fill-opacity="0.45" stroke="#b5651d"/>`;
       d += `<rect x="${side < 0 ? x - tp - 18 : x + tp}" y="${yt - 20}" width="18" height="${hs + 40}" fill="#eef0f3" stroke="#9aa3b0"/>`;
       const nr = Math.max(1, Math.round(U.num(w.nr))); for (let k = 0; k < nr; k++) { const yy = ym - hp / 2 + (k + 0.5) * hp / nr; d += `<line x1="${x - tp - 8}" y1="${yy}" x2="${x + tp + 8}" y2="${yy}" stroke="#39414f" stroke-width="2"/>`; }
+    } else if (w.typ === 'katowniki') {
+      const hp = U.num(w.hp) / sec.h * hs, ym = (yt + yb) / 2, side = p.x < L / 2 ? -1 : 1, wz = 18;
+      d += `<rect x="${side < 0 ? x - 4 : x - wz + 4}" y="${ym - hp / 2}" width="${wz}" height="${hp}" fill="#b5651d" fill-opacity="0.45" stroke="#b5651d"/><rect x="${side < 0 ? x - 22 : x + 4}" y="${yt - 20}" width="18" height="${hs + 40}" fill="#eef0f3" stroke="#9aa3b0"/>`;
+      const n = Math.max(1, Math.round(U.num(w.nr))); for (let k = 0; k < n; k++) d += `<circle cx="${x + side * -6}" cy="${ym - hp / 2 + (k + 0.5) * hp / n}" r="2.4" fill="#39414f"/>`;
+    } else if (w.typ === 'spawane') {
+      const side = p.x < L / 2 ? -1 : 1;
+      d += `<rect x="${side < 0 ? x - 18 : x}" y="${yt - 20}" width="18" height="${hs + 40}" fill="#eef0f3" stroke="#9aa3b0"/><line x1="${x}" y1="${w.spoiny === 'srodnik' ? yt + tf : yt}" x2="${x}" y2="${w.spoiny === 'srodnik' ? yb - tfd : yb}" stroke="#c0262d" stroke-width="3"/>`;
     } else if (w.typ === 'blacha_zebrowa') {
       const hp = U.num(w.hp) / sec.h * hs, ym = (yt + yb) / 2, side = p.x < L / 2 ? -1 : 1, wz = 22;
       d += `<rect x="${side < 0 ? x - 6 : x - wz + 6}" y="${ym - hp / 2}" width="${wz}" height="${hp}" fill="#b5651d" fill-opacity="0.35" stroke="#b5651d"/><rect x="${side < 0 ? x - 24 : x + 6}" y="${yt - 20}" width="18" height="${hs + 40}" fill="#eef0f3" stroke="#9aa3b0"/>`;
@@ -419,6 +428,7 @@ D.elevation = function (S, R, o) {
     }
     g += `<g class="jnt" data-sup="${i}" style="cursor:pointer"><title>Podpora ${p.id} – kliknij, aby zmienić węzeł/oparcie</title><rect x="${x - 26}" y="${yt - 24}" width="52" height="${hs + 70}" fill="#ffffff" fill-opacity="0"/>${d}${tx(x, yb + 52, p.id, { fs: 11, w: 700 })}</g>`;
   });
+  (S.styki || []).forEach((st2, j) => { const x = X(U.clamp(U.num(st2.x) * 1000, 0, L)), lw = Math.max(16, Math.min(60, 0.5 * (W - ml - mr) * 400 / L)); g += `<g class="sty" data-sty="${j}" style="cursor:pointer"><title>Styk S${j + 1} (x = ${fmt(U.num(st2.x), 2)} m) – kliknij, aby projektować</title><rect x="${x - lw / 2 - 4}" y="${yt - 26}" width="${lw + 8}" height="${hs + 52}" fill="#ffffff" fill-opacity="0"/>${st2.typ === 'spawany' ? `<line x1="${x}" y1="${yt}" x2="${x}" y2="${yb}" stroke="#c0262d" stroke-width="2.5"/>` : `<rect x="${x - lw / 2}" y="${yt - 4}" width="${lw}" height="4" fill="#e6a35a" stroke="#b5651d"/><rect x="${x - lw / 2}" y="${yb}" width="${lw}" height="4" fill="#e6a35a" stroke="#b5651d"/><rect x="${x - lw / 3}" y="${yt + tf + 3}" width="${lw * 2 / 3}" height="${Math.max(6, hs - tf - tfd - 6)}" fill="#e6a35a" fill-opacity="0.5" stroke="#b5651d"/>`}<line x1="${x}" y1="${yt - 8}" x2="${x}" y2="${yb + 8}" stroke="#1b2230" stroke-width="0.8" stroke-dasharray="3 2"/>${tx(x, yt - 12, 'S' + (j + 1), { fs: 10, w: 700, c: '#b5651d' })}</g>`; });
   md.tmp.forEach((t, i) => { const x = X(t.x); g += `<g class="tsupp" data-tmp="${i}" style="cursor:pointer" opacity="0.7"><rect x="${x - 10}" y="${yb}" width="20" height="40" fill="#ffffff" fill-opacity="0"/><line x1="${x}" y1="${yb}" x2="${x}" y2="${yb + 34}" stroke="#a35d00" stroke-width="2" stroke-dasharray="4 3"/>${tx(x, yb + 46, t.id + ' (montaż)', { fs: 9, c: '#a35d00' })}</g>`; });
   (md.stez || []).forEach(z => { const x = X(z.x); g += `<g class="rst" data-rst="${z.src}" style="cursor:pointer"><title>Stężenie ${z.typ} x = ${fmt(z.x / 1000, 2)} m</title><path d="M ${x - 6} ${yt - 14} L ${x + 6} ${yt - 14} L ${x} ${yt - 2} Z" fill="#1d5bb8"/><line x1="${x}" y1="${yt - 30}" x2="${x}" y2="${yt - 14}" stroke="#1d5bb8"/></g>`; });
   if ((md.ciagle || {}).pasG) g += `<line x1="${X(0)}" y1="${yt - 5}" x2="${X(L)}" y2="${yt - 5}" stroke="#1d5bb8" stroke-width="2" stroke-dasharray="3 3"/>`;
