@@ -6,7 +6,9 @@ const UI = ['baza', 'rysunki', 'rys_wezly', 'objasnienia', 'raport', 'odt', 'app
 const read = (p) => readFileSync(p, 'utf8');
 const css = read('src/ui/app.css');
 const scripts = ENGINE.concat(UI).map(p => `<script>/* ${p} */\n${read(p).replace(/<\/script/gi, '<\\/script')}\n</script>`).join('\n');
-let html = read('src/ui/index.html').replace('/*@CSS@*/', () => css).replace('<!--@SCRIPTS@-->', () => scripts);
+// ikona strony (ta sama co ikona programu .exe – dwuteownik)
+const icon = `<link rel="icon" type="image/png" href="data:image/png;base64,${readFileSync('host/ikona32.png').toString('base64')}">`;
+let html = read('src/ui/index.html').replace('/*@CSS@*/', () => css).replace('<!--@ICON@-->', () => icon).replace('<!--@SCRIPTS@-->', () => scripts);
 mkdirSync('dist', { recursive: true });
 writeFileSync('dist/BelkaStal.html', html);
 const h = createHash('sha256').update(html).digest('hex');

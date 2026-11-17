@@ -164,6 +164,7 @@ func main() {
 		AutoFocus: true,
 		DataPath:  filepath.Join(dir, "WebView2"),
 		WindowOptions: webview2.WindowOptions{
+			IconId: 1, // ikona z zasobu rsrc_windows_amd64.syso (ikona.ico)
 			Title:  "BelkaStal",
 			Width:  1440,
 			Height: 900,

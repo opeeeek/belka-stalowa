@@ -196,10 +196,15 @@ V.ltb = function (el) {
 
 /* ================================================================ BELKA I POŁĄCZENIA */
 const miniChecks = (cs) => `<table class="kv" style="width:100%;margin-top:4px">${cs.filter(c => !c.info).slice().sort((a, b) => (b.util || 0) - (a.util || 0)).slice(0, 5).map(c => `<tr><td style="font-size:11.5px">${esc(c.n.replace(/^[^:]+: /, ''))}</td><td style="white-space:nowrap">${A.utilBar(c)}</td></tr>`).join('')}</table>`;
+const view3d = () => { try { return localStorage.getItem('bs.view') === '3d'; } catch (e) { return false; } };
 V.elev = function (el) {
   if (!ok()) { el.innerHTML = head(el) + errBox(); bindHead(el); return; }
   const r = R(), md = r.md, sec = r.sec, W = W0(el), out = {};
-  let h = head(el) + `<div class="box v3box"><h4>Widok 3D <span class="hint" style="margin-left:8px;font-weight:400">przeciągnij – obrót · prawy przycisk lub Shift – przesunięcie · kółko – przybliżenie · dwuklik – widok ogólny · kliknij element – edycja</span></h4><div id="v3"></div></div><div class="box elevbox"><h4>Belka – widok podłużny <span class="hint" style="margin-left:8px;font-weight:400">kliknij węzeł / oparcie lub styk – okno projektowania połączeń; stężenie, podporę montażową · Ctrl + kółko – powiększenie</span><button class="btn sm pri" id="veJd" type="button" style="float:right">Projektowanie połączeń…</button></h4><div class="elevwrap"><div class="zoomtgt">${D.elevation(S(), r, { W, out })}</div></div><div id="veInfo" class="hint" style="min-height:18px"></div></div>`;
+  // jeden widok belki z przełącznikiem 2D / 3D (wybór zapamiętany)
+  const v3on = view3d();
+  const hint = v3on ? 'przeciągnij – obrót · prawy przycisk lub Shift – przesunięcie · kółko – przybliżenie · dwuklik – widok ogólny · kliknij element – edycja' : 'kliknij węzeł / oparcie, styk lub żebro – okno edycji; stężenie, podporę montażową · Ctrl + kółko – powiększenie';
+  let h = head(el) + `<div class="box elevbox"><div class="vhead"><span class="segsw" role="tablist" aria-label="Rodzaj widoku belki"><button type="button" data-vmode="2d" class="${v3on ? '' : 'on'}" title="Widok podłużny belki (rysunek 2D)">Widok 2D</button><button type="button" data-vmode="3d" class="${v3on ? 'on' : ''}" title="Model przestrzenny belki z połączeniami">Widok 3D</button></span><span class="hint" style="margin:0;flex:1;min-width:200px">${hint}</span><button class="btn sm pri" id="veJd" type="button">Projektowanie połączeń…</button></div>`
+    + (v3on ? '<div id="v3"></div>' : `<div class="elevwrap"><div class="zoomtgt">${D.elevation(S(), r, { W, out })}</div></div><div id="veInfo" class="hint" style="min-height:18px"></div>`) + '</div>';
   h += '<div class="cards jcards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px">';
   (r.podpory || []).filter(p => !p.tymcz).forEach(p => {
     const i = md.sup.findIndex(q => q.id === p.id), w = (S().podpory[i] || {}).wezel || { typ: 'brak' };
@@ -218,7 +223,8 @@ V.elev = function (el) {
   el.innerHTML = h;
   bindHead(el); Q.themeSvgIn(el); Q.zoomApply(el); A.bindNref(el);
   const jd = $('#veJd', el); if (jd) jd.onclick = () => A.jointDesigner();
-  try { BS.V3.mount($('#v3', el), S(), r); } catch (e) { console.error(e); const v = $('#v3', el); if (v) v.innerHTML = `<p class="hint">Widok 3D niedostępny: ${esc(e.message)}</p>`; }
+  $$('[data-vmode]', el).forEach(b => b.addEventListener('click', () => { try { localStorage.setItem('bs.view', b.dataset.vmode); } catch (e) { /* */ } V.elev(el); }));
+  if (v3on) { try { BS.V3.mount($('#v3', el), S(), r); } catch (e) { console.error(e); const v = $('#v3', el); if (v) v.innerHTML = `<p class="hint">Widok 3D niedostępny: ${esc(e.message)}</p>`; } }
   $$('.jnt', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.jointDesigner({ sup: +g.dataset.sup }); }));
   $$('.sty', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.jointDesigner({ styk: +g.dataset.sty }); }));
   $$('.stf', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.stiffPopup(g.dataset.stf === 'g' ? null : +g.dataset.stf); }));
