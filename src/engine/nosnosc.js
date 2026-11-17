@@ -327,7 +327,7 @@ R.patch = function (sec, b, ndp, o) {
 };
 
 /* ---------------------------------------------------------- żebro podporowe (PN-EN 1993-1-5, 9.4; PN-EN 1993-1-1, 6.3.1) */
-// o: { F, bs, ts, ch (fazka), koniec: true – żebro na końcu belki (jednostronny udział środnika), e (odl. do końca), pasyUstalone }
+// o: { F, bs, ts, ch (wcięcie narożne 45° c × c – zmniejsza szerokość docisku do b_s − c), koniec: true – żebro na końcu belki (jednostronny udział środnika), e (odl. do końca), pasyUstalone }
 R.stiffener = function (sec, b, ndp, o) {
   const fy = b.fy, eps = b.eps, tw = sec.tw, hw = sec.hw;
   const bs = o.bs, ts = o.ts;
@@ -348,7 +348,7 @@ R.stiffener = function (sec, b, ndp, o) {
   const Fbear = Acont * fy / ndp.gM0;
   // wymagana sztywność/smukłość ścianek żebra (pas wspornikowy kl. 3: bs/ts ≤ 14ε)
   const ctS = bs / ts, ctLim = 14 * eps;
-  return { As, Is, i, Lcr, lam, chi, NbRd, Acont, Fbear, uB: Math.abs(o.F) / NbRd, uC: Math.abs(o.F) / Fbear, ctS, ctLim, lw: left + right, F: o.F, bs, ts };
+  return { As, Is, i, Lcr, lam, chi, NbRd, Acont, Fbear, uB: Math.abs(o.F) / NbRd, uC: Math.abs(o.F) / Fbear, ctS, ctLim, lw: left + right, F: o.F, bs, ts, c: o.ch || 0, nS };
 };
 
 })(typeof globalThis !== 'undefined' ? globalThis : this);

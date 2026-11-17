@@ -33,6 +33,15 @@ const tbl = (head, rows) => `<table class="rtab"><tr>${head.map(h => `<th>${h}</
 const mk = (id, html) => `<!--ck:${id}-->${html}<!--/ck:${id}-->`;
 const WYS = { pas_g: 'pas górny', srodek: 'środek ścinania', pas_d: 'pas dolny' };
 const SUPN = { przegub: 'przegubowa', utwierdzenie: 'utwierdzenie', sprezyna: 'sprężysta', podatne: 'przegub + sprężyna obrotowa' };
+// wcięcia narożne żeber 45° – opis i szczegół (odpływ cynku, ominięcie promienia / spoiny pas–środnik)
+function snipeTxt(S, R) {
+  const sec = R.sec, z = (R.zebra || [])[0]; if (!z || !sec) return '';
+  const g = BS.J.snipe(sec, (S.analiza || {}).zebraWc), c = z.c || 0, hw = sec.hw || (sec.h - sec.tg - sec.td);
+  const t = c > 0
+    ? `Wcięcia narożne żeber 45° c × c = ${f(c, 0)} × ${f(c, 0)} mm${g.isAuto ? ' (wymiar automatyczny)' : ''} przy obu pasach od strony środnika: odpływ cynku i odpowietrzenie podczas cynkowania zanurzeniowego (PN-EN ISO 14713-2), ominięcie ${sec.typ === 'spaw' ? `spoiny pas–środnik (√2·a = ${f(g.cMin, 1)} mm)` : `promienia wyokrąglenia r = ${f(g.cMin, 0)} mm`}. Długość spoin żebro–środnik l<sub>w</sub> = h<sub>w</sub> − 2c = ${f(hw - 2 * c, 0)} mm; docisk żebra do pasa na szerokości b<sub>s</sub> − c.`
+    : 'Żebra bez wcięć narożnych (dopasowane do promienia / spoiny pas–środnik) – przy cynkowaniu zanurzeniowym wymagane wcięcia lub otwory odpływowe (PN-EN ISO 14713-2).';
+  return `${line(t)}<div class="fig">${BS.D.stiffDetail(sec, { bs: z.bs, ts: z.ts, c, strona: z.strona, a: sec.aw })}</div>`;
+}
 const WEZN = { brak: 'oparcie na stali', oparcie: 'płyta podporowa', blacha_czolowa: 'krótka blacha czołowa', blacha_zebrowa: 'blacha żebrowa' };
 const V0 = (v, unit) => (v === null || v === undefined || !isFinite(v)) ? '—' : unit === 'I' ? f(v / 1e4, 1) + ' cm⁴' : unit === 'MPa' ? f(v, 1) + ' MPa' : unit === 'M' ? f(v / 1e6) + ' kNm' : unit === 'F' ? f(v / 1e3) + ' kN' : unit === 'q' ? f(v, 1) + ' N/mm' : unit === 'mm' ? f(v, 1) + ' mm' : f(v, 3);
 RP.unitFmt = V0;
@@ -74,11 +83,11 @@ RP.takeoff = function (S, R) {
     else if (o && w.typ === 'katowniki') rows.push({ poz: poz++, n: `Kątowniki – podpora ${p.id}`, mat: o.pl.gat, szt: 2, wym: `L${String(w.L).replace(/x/g, '×')}, l = ${f(U.num(w.hp), 0)}`, m: o.mass });
     else if (w.typ === 'oparcie' && w.podloze !== 'stal') rows.push({ poz: poz++, n: `Płyta podporowa – podpora ${p.id}`, mat: S.material.gatunek, szt: 1, wym: `${f(U.num(w.tp), 0)}×${f(U.num(w.bp), 0)}×${f(U.num(w.lp), 0)}`, m: rho * U.num(w.tp) * U.num(w.bp) * U.num(w.lp) });
     if (o) { addB(o); weld += o.weldL || 0; }
-    if (w.zebro && (sec.kind === 'I' || sec.kind === 'U')) { const hs = sec.hw || (sec.h - sec.tg - sec.td); rows.push({ poz: poz++, n: `Żebra podporowe – podpora ${p.id}`, mat: S.material.gatunek, szt: sec.kind === 'U' ? 1 : 2, wym: `${f(U.num(w.ts), 0)}×${f(U.num(w.bs), 0)}×${f(hs, 0)}`, m: (sec.kind === 'U' ? 1 : 2) * rho * U.num(w.ts) * U.num(w.bs) * hs }); weld += (sec.kind === 'U' ? 2 : 4) * hs; }
+    if (w.zebro && (sec.kind === 'I' || sec.kind === 'U')) { const hs = sec.hw || (sec.h - sec.tg - sec.td), c = BS.J.snipeSup(S, sec, w).c, nP = sec.kind === 'U' ? 1 : 2; rows.push({ poz: poz++, n: `Żebra podporowe – podpora ${p.id}`, mat: S.material.gatunek, szt: nP, wym: `${f(U.num(w.ts), 0)}×${f(U.num(w.bs), 0)}×${f(hs, 0)}${c > 0 ? `, wcięcia 45° ${f(c, 0)}×${f(c, 0)}` : ''}`, m: nP * rho * U.num(w.ts) * (U.num(w.bs) * hs - c * c) }); weld += 2 * nP * Math.max(0, hs - 2 * c); }
   });
   (R.styki || []).forEach((q, j) => { const o = q.o, s2 = S.styki[j] || {}; if (!o) return; if (o.geom && o.typ === 'nakladkowy') { const g = o.geom; rows.push({ poz: poz++, n: `Styk ${q.id} – nakładki pasów`, mat: (o.plf || {}).gat || S.material.gatunek, szt: g.tfi > 0 ? 6 : 2, wym: `${f(g.bfo, 0)}×${f(g.tfo, 0)}${g.tfi > 0 ? ` + 4×${f(g.bfi, 0)}×${f(g.tfi, 0)}` : ''}, l = ${f(g.Lf, 0)}`, m: 7.85e-6 * 2 * (g.bfo * g.tfo + (g.tfi > 0 ? 2 * g.bfi * g.tfi : 0)) * g.Lf }); rows.push({ poz: poz++, n: `Styk ${q.id} – nakładki środnika`, mat: (o.plw || {}).gat || S.material.gatunek, szt: 2, wym: `${f(g.hpw, 0)}×${f(g.tpw, 0)}, l = ${f(g.Lw, 0)}`, m: 7.85e-6 * 2 * g.hpw * g.tpw * g.Lw }); addB(o); } else if (s2.typ === 'spawany') weld += 2 * (sec.bg || sec.b || 0) + sec.h; });
-  const zg = {}; (R.zebra || []).forEach(z => { const nS = z.strona === 'jedna' ? 1 : 2, k = `${f(z.ts, 0)}×${f(z.bs, 0)}`; zg[k] = zg[k] || { n: 0, ts: z.ts, bs: z.bs }; zg[k].n += nS; });
-  const hsz = sec.hw || sec.h; Object.keys(zg).forEach(k => { const q = zg[k]; rows.push({ poz: poz++, n: 'Żebra poprzeczne środnika', mat: S.material.gatunek, szt: q.n, wym: `${k}×${f(hsz, 0)}`, m: q.n * rho * q.ts * q.bs * hsz }); weld += 2 * q.n * hsz; });
+  const zg = {}; (R.zebra || []).forEach(z => { const nS = z.strona === 'jedna' ? 1 : 2, c = z.c || 0, k = `${f(z.ts, 0)}×${f(z.bs, 0)}|${f(c, 0)}`; zg[k] = zg[k] || { n: 0, ts: z.ts, bs: z.bs, c }; zg[k].n += nS; });
+  const hsz = sec.hw || sec.h; Object.keys(zg).forEach(k => { const q = zg[k]; rows.push({ poz: poz++, n: 'Żebra poprzeczne środnika', mat: S.material.gatunek, szt: q.n, wym: `${f(q.ts, 0)}×${f(q.bs, 0)}×${f(hsz, 0)}${q.c > 0 ? `, wcięcia 45° ${f(q.c, 0)}×${f(q.c, 0)}` : ''}`, m: q.n * rho * q.ts * (q.bs * hsz - q.c * q.c) }); weld += 2 * q.n * Math.max(0, hsz - 2 * q.c); });
   const tot = rows.reduce((q, r) => q + r.m, 0);
   return { rows, total: tot, bolts, weld, surf: (sec.AmV ? null : null), area: R.pozar && R.pozar.sf ? null : null };
 };
@@ -160,7 +169,7 @@ RP.build = function (S, R, opt) {
       else t = line(`<b>${esc(c.n)}</b>: ${f(c.d.eta2, 3)} + 0,8·${f(c.d.eta1, 3)} = ${f(c.Ed, 3)} ≤ 1,4${okS(c.util)}`, '7.2');
       h += mk(c.id, t);
     });
-    if ((R.zebra || []).length) h += '<h3>Żebra poprzeczne środnika i panele</h3>' + line(`Żebra: ${R.zebra.map(z => `x = ${f(z.x / 1000)} m (${z.strona === 'jedna' ? 'jednostronne' : 'obustronne'} ${f(z.bs, 0)}×${f(z.ts, 0)} mm)`).join('; ')}`) + (R.panels || []).map(q => line(`Panel ${f(q.x0 / 1000)}–${f(q.x1 / 1000)} m: a = ${isFinite(q.a) ? f(q.a, 0) + ' mm' : '∞'}, k<sub>τ</sub> = ${f(q.sb.kt, 3)}, λ̄<sub>w</sub> = ${f(q.sb.lw, 3)}, χ<sub>w</sub> = ${f(q.sb.chi, 3)}, V<sub>b,Rd</sub> = ${kN(q.sb.Vb)} kN`, '5.2, 5.3')).join('');
+    if ((R.zebra || []).length) h += '<h3>Żebra poprzeczne środnika i panele</h3>' + line(`Żebra: ${R.zebra.map(z => `x = ${f(z.x / 1000)} m (${z.strona === 'jedna' ? 'jednostronne' : 'obustronne'} ${f(z.bs, 0)}×${f(z.ts, 0)} mm)`).join('; ')}`) + snipeTxt(S, R) + (R.panels || []).map(q => line(`Panel ${f(q.x0 / 1000)}–${f(q.x1 / 1000)} m: a = ${isFinite(q.a) ? f(q.a, 0) + ' mm' : '∞'}, k<sub>τ</sub> = ${f(q.sb.kt, 3)}, λ̄<sub>w</sub> = ${f(q.sb.lw, 3)}, χ<sub>w</sub> = ${f(q.sb.chi, 3)}, V<sub>b,Rd</sub> = ${kN(q.sb.Vb)} kN`, '5.2, 5.3')).join('');
   }
   // ---------------------------------------------------------- 7. stateczność
   h += H2('SGN – stateczność: zwichrzenie i interakcja (PN-EN 1993-1-1, 6.3)');
@@ -190,7 +199,7 @@ RP.build = function (S, R, opt) {
     h += line(`R<sub>Ed,max</sub> = <b>${kN(p.Rmax)} kN</b>${p.Mmax > 1e3 ? `; |M<sub>Ed</sub>| = ${kNm(p.Mmax)} kNm` : ''}; reakcje charakterystyczne (etap ${p.eK + 1}): ${p.Rk.map(r => `${esc(r.id)}: ${kN(r.R)} kN`).join(', ')}`);
     p.equ.forEach(e => { h += mk(`${p.id}-EQU`, line(`EQU, etap ${e.etap + 1}: R<sub>min</sub> = ${kN(e.Rmin)} kN ${e.Rmin < 0 ? '<span class="fail">– odrywanie: wymagane zakotwienie</span>' : '– docisk zapewniony'}`, 'PN-EN 1990 tabl. A1.2(A)')); });
     if (p.patch) h += mk(`${p.id}-PL`, patchTxt(p.patch, `Docisk środnika nad podporą ${p.id}`));
-    if (p.zebro) { const z = p.zebro; h += mk(`${p.id}-ZB`, line(`Żebra podporowe ${f(z.bs, 0)} × ${f(z.ts, 0)} mm + pasmo środnika 15εt<sub>w</sub>: A<sub>s</sub> = ${f(z.As / 100)} cm², I<sub>s</sub> = ${f(z.Is / 1e4, 1)} cm⁴, i = ${f(z.i, 1)} mm, l = ${f(z.Lcr, 0)} mm, λ̄ = ${f(z.lam, 3)}, krzywa c: χ = ${f(z.chi, 3)}; N<sub>b,Rd</sub> = ${kN(z.NbRd)} kN ≥ R<sub>Ed</sub> = ${kN(z.F)} kN${okS(z.uB)}`, 'PN-EN 1993-1-5 9.4')) + mk(`${p.id}-ZD`, line(`Docisk końców żeber: A<sub>c</sub> = ${f(z.Acont, 0)} mm², F<sub>Rd</sub> = ${kN(z.Fbear)} kN${okS(z.uC)}`, '6.2.4')); }
+    if (p.zebro) { const z = p.zebro; h += mk(`${p.id}-ZB`, line(`Żebra podporowe ${f(z.bs, 0)} × ${f(z.ts, 0)} mm + pasmo środnika 15εt<sub>w</sub>: A<sub>s</sub> = ${f(z.As / 100)} cm², I<sub>s</sub> = ${f(z.Is / 1e4, 1)} cm⁴, i = ${f(z.i, 1)} mm, l = ${f(z.Lcr, 0)} mm, λ̄ = ${f(z.lam, 3)}, krzywa c: χ = ${f(z.chi, 3)}; N<sub>b,Rd</sub> = ${kN(z.NbRd)} kN ≥ R<sub>Ed</sub> = ${kN(z.F)} kN${okS(z.uB)}`, 'PN-EN 1993-1-5 9.4')) + mk(`${p.id}-ZD`, line(`Docisk końców żeber: A<sub>c</sub> = ${z.nS || 2}·(b<sub>s</sub> − c)·t<sub>s</sub> = ${z.nS || 2}·(${f(z.bs, 0)} − ${f(z.c || 0, 0)})·${f(z.ts, 0)} = ${f(z.Acont, 0)} mm² (c – wcięcie narożne 45° przy pasie), F<sub>Rd</sub> = A<sub>c</sub>·f<sub>y</sub>/γ<sub>M0</sub> = ${kN(z.Fbear)} kN${okS(z.uC)}`, '6.2.4')); }
     if (p.plyta) p.plyta.checks.forEach((c, k) => { h += mk(`${p.id}-B${k}`, line(`${esc(c.n)}: ${esc(c.f || '')}; F<sub>Rd</sub> = ${kN(c.Rd)} kN ≥ R<sub>Ed</sub> = ${kN(c.Ed)} kN${okS(c.u)}`, c.ref)); });
     if (p.pol) h += jointBody(S, R, p.pol, p.F, p.wezel, p.id);
   });

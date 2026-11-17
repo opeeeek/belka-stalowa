@@ -97,6 +97,7 @@ N.WYROBY = [
   { k: 'EN10365', oznaczenie: 'PN-EN 10365', en: 'EN 10365:2017', tytul: 'Kształtowniki walcowane na gorąco – ceowniki, dwuteowniki – wymiary i masy', zakres: 'wymiary IPE, HEA, HEB, HEM' },
   { k: 'EN10034', oznaczenie: 'PN-EN 10034', en: 'EN 10034:1993', tytul: 'Kształtowniki I i H ze stali konstrukcyjnej – tolerancje wymiarów i kształtu', zakres: 'tolerancje wyrobu' },
   { k: 'EN10029', oznaczenie: 'PN-EN 10029', en: 'EN 10029:2010', tytul: 'Blachy stalowe walcowane na gorąco grubości ≥ 3 mm – tolerancje', zakres: 'blachy: pasy blachownic, blachy czołowe, żebra' },
+  { k: 'ISO14713-2', oznaczenie: 'PN-EN ISO 14713-2', en: 'EN ISO 14713-2:2019', tytul: 'Powłoki cynkowe – Wytyczne i zalecenia dotyczące ochrony przed korozją konstrukcji ze stali – Część 2: Cynkowanie zanurzeniowe', zakres: 'wcięcia narożne żeber i otwory odpływowe / odpowietrzające' },
   { k: 'EN10164', oznaczenie: 'PN-EN 10164', en: 'EN 10164:2018', tytul: 'Wyroby stalowe o polepszonych właściwościach plastycznych w kierunku prostopadłym do powierzchni', zakres: 'klasy Z15/Z25/Z35' },
   { k: 'EN10204', oznaczenie: 'PN-EN 10204', en: 'EN 10204:2004', tytul: 'Wyroby metalowe – rodzaje dokumentów kontroli', zakres: 'świadectwa 2.2 / 3.1' },
   { k: 'EN15048', oznaczenie: 'PN-EN 15048-1', en: 'EN 15048-1:2016', tytul: 'Zestawy śrubowe konstrukcyjne bez sprężania', zakres: 'śruby kl. 4.6…10.9 (PN-EN ISO 4014/4017, nakrętki PN-EN ISO 4032, PN-EN ISO 898-1)' },

@@ -62,6 +62,12 @@ Scene.prototype.bolt = function (p0, p1, B, ob) {
   this.prism(sub(p0, mul(d, 0.1)), add(p1, mul(d, 0.25 * dd)), dd / 2, 8, COL.bolt, ob, false);
   this.prism(p1, add(p1, mul(d, 0.8 * dd)), R6, 6, COL.bolt, ob, true, Math.PI / 6);
 };
+// żebro środnika: blacha w płaszczyźnie y–z (grubość wzdłuż X) z wcięciami narożnymi 45° c × c przy pasach (od strony środnika)
+Scene.prototype.stiff = function (x, ts, yIn, s, bs, z0, z1, c, col, ob) {
+  const yo = yIn + s * bs, cc = Math.max(0, Math.min(c || 0, 0.9 * bs, 0.45 * (z1 - z0)));
+  const ring = cc > 0 ? [[yIn, z0 + cc], [yIn + s * cc, z0], [yo, z0], [yo, z1], [yIn + s * cc, z1], [yIn, z1 - cc]] : [[yIn, z0], [yo, z0], [yo, z1], [yIn, z1]];
+  this.extrude([ring], [x - ts / 2, x + ts / 2], col, ob);
+};
 // wyciągnięcie przekroju (pierścienie y–z) wzdłuż X od x0 do x1
 // podział belki wzdłuż X: gęsto przy elementach (połączenia, żebra, styki), rzadziej dalej – poprawna kolejność rysowania
 function gridXs(L, feats, maxStep) {
@@ -119,10 +125,10 @@ function build(S, R) {
   sc.extrude(sec.rings.map(r => simplify(r, h)), xsB, COL.beam, beam, opts.xray ? 0.35 : 1);
   // żebra środnika
   (R.zebra || []).forEach(z => {
-    const ob = sc.o(`Żebro środnika x = ${fmt(z.x / 1000, 2)} m – ${z.strona === 'jedna' ? 'jednostronne' : 'obustronne'} ${fmt(z.bs, 0)}×${fmt(z.ts, 0)} mm`, () => A.stiffPopup(z.src === 'g' ? null : z.src), { kind: 'stiff', x: z.x });
+    const ob = sc.o(`Żebro środnika x = ${fmt(z.x / 1000, 2)} m – ${z.strona === 'jedna' ? 'jednostronne' : 'obustronne'} ${fmt(z.bs, 0)}×${fmt(z.ts, 0)} mm${z.c > 0 ? `, wcięcia narożne 45° c = ${fmt(z.c, 0)} mm` : ', bez wcięć narożnych'}`, () => A.stiffPopup(z.src === 'g' ? null : z.src), { kind: 'stiff', x: z.x });
     const zz0 = td, zz1 = h - tg;
-    if (sec.kind === 'U' || z.strona !== 'jedna') sc.box(z.x - z.ts / 2, z.x + z.ts / 2, yw1, yw1 + z.bs, zz0, zz1, COL.stiff, ob);
-    if (sec.kind === 'I') sc.box(z.x - z.ts / 2, z.x + z.ts / 2, yw0 - z.bs, yw0, zz0, zz1, COL.stiff, ob);
+    if (sec.kind === 'U' || z.strona !== 'jedna') sc.stiff(z.x, z.ts, yw1, 1, z.bs, zz0, zz1, z.c, COL.stiff, ob);
+    if (sec.kind === 'I') sc.stiff(z.x, z.ts, yw0, -1, z.bs, zz0, zz1, z.c, COL.stiff, ob);
   });
   // podpory i połączenia
   const last = md.sup.length - 1;
@@ -134,7 +140,7 @@ function build(S, R) {
     const ob = sc.o(name, () => (['blacha_czolowa', 'blacha_zebrowa', 'katowniki', 'spawane'].includes(w.typ) ? A.jointDesigner({ sup: i }) : A.supportPopup(i)), { kind: 'sup', x: p.x });
     const conn = isEnd && o && ['blacha_czolowa', 'blacha_zebrowa', 'katowniki', 'spawane'].includes(w.typ);
     // żebra podporowe
-    if (w.zebro && (sec.kind === 'I' || sec.kind === 'U')) { const bs = U.num(w.bs, 70), ts = U.num(w.ts, 10); sc.box(p.x - ts / 2, p.x + ts / 2, yw1, yw1 + bs, td, h - tg, COL.stiff, ob); if (sec.kind === 'I') sc.box(p.x - ts / 2, p.x + ts / 2, yw0 - bs, yw0, td, h - tg, COL.stiff, ob); }
+    if (w.zebro && (sec.kind === 'I' || sec.kind === 'U')) { const bs = U.num(w.bs, 70), ts = U.num(w.ts, 10), c = BS.J.snipeSup(S, sec, w).c; sc.stiff(p.x, ts, yw1, 1, bs, td, h - tg, c, COL.stiff, ob); if (sec.kind === 'I') sc.stiff(p.x, ts, yw0, -1, bs, td, h - tg, c, COL.stiff, ob); }
     if (!opts.sup && !conn) return;
     if (conn) {
       const g = o.geom || {}, B = o.B, tsup = Math.max(6, U.num(w.tsup, 12)), sup = w.sup || 'pas_slupa';
@@ -270,7 +276,8 @@ V3.mount = function (host, S, R) {
   const sc = build(S, R);
   if (!cam || cam.L !== sc.L || cam.h !== sc.h) { cam = camFit(sc); cam.L = sc.L; cam.h = sc.h; }
   const md = R.md;
-  const views = [['all', 'Widok ogólny']].concat(md.sup.map((p, i) => [`s${i}`, `Podpora ${p.id}`])).concat((R.styki || []).map((q, j) => [`t${j}`, `Styk ${q.id}`]));
+  const zMid = (R.zebra || []).map((z, j) => [z, j]).filter(([z]) => !md.sup.some(p => Math.abs(p.x - z.x) <= 30)).slice(0, 6);
+  const views = [['all', 'Widok ogólny']].concat(md.sup.map((p, i) => [`s${i}`, `Podpora ${p.id}`])).concat((R.styki || []).map((q, j) => [`t${j}`, `Styk ${q.id}`])).concat(zMid.map(([z, j]) => [`z${j}`, `Żebro x = ${fmt(z.x / 1000, 2)} m`]));
   host.innerHTML = `<div class="v3bar"><span class="segsw sm">${views.map(([k, l]) => `<button type="button" data-v3="${k}">${esc(l)}</button>`).join('')}</span><span class="segsw sm">${[['iso', 'Izometria'], ['side', 'Z boku'], ['top', 'Z góry'], ['end', 'Od czoła']].map(([k, l]) => `<button type="button" data-v3d="${k}">${l}</button>`).join('')}</span>
     <label class="chk sm"><input type="checkbox" data-v3o="slab" ${opts.slab ? 'checked' : ''}><span>płyta / poszycie</span></label><label class="chk sm"><input type="checkbox" data-v3o="sup" ${opts.sup ? 'checked' : ''}><span>elementy podpierające</span></label><label class="chk sm"><input type="checkbox" data-v3o="xray" ${opts.xray ? 'checked' : ''}><span>belka przezroczysta</span></label></div>
     <div class="v3wrap"><canvas class="v3cv" tabindex="0" aria-label="Widok 3D belki"></canvas><div class="v3tip" style="display:none"></div></div>`;
@@ -307,7 +314,7 @@ V3.mount = function (host, S, R) {
   cv.addEventListener('dblclick', () => { cam = Object.assign(camFit(sc), { L: sc.L, h: sc.h }); draw(); });
   host.querySelectorAll('[data-v3]').forEach(b => b.addEventListener('click', () => {
     const k = b.dataset.v3; let x = null;
-    if (k[0] === 's') x = md.sup[+k.slice(1)].x; else if (k[0] === 't') x = (R.styki[+k.slice(1)] || {}).x;
+    if (k[0] === 's') x = md.sup[+k.slice(1)].x; else if (k[0] === 't') x = (R.styki[+k.slice(1)] || {}).x; else if (k[0] === 'z') x = (R.zebra[+k.slice(1)] || {}).x;
     cam = Object.assign(camFit(sc, x), { L: sc.L, h: sc.h }); draw();
   }));
   host.querySelectorAll('[data-v3d]').forEach(b => b.addEventListener('click', () => {

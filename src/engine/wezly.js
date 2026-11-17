@@ -621,8 +621,8 @@ W.defaults = function (typ, sec) {
   if (typ === 'blacha_zebrowa') return Object.assign(com, { hp, tp: 10, nr, n: nr, nc: 1, e1: 40, p1, e2: 50, p2: 60, z: 60, e2b: 50, a: 6 });
   if (typ === 'katowniki') return Object.assign(com, { L: '90x9', Lser: 'L', dlugiNaPodp: false, hp, nr, e1: 40, p1, gb: 50, gs: 50, gap: 10, sup: 'pas_slupa' });
   if (typ === 'spawane') return Object.assign(com, { spoiny: 'srodnik', aw: Math.max(3, Math.ceil(0.55 * tw)), af: 6 });
-  if (typ === 'oparcie') return { podloze: 'beton', bp: 200, lp: 150, tp: 15, beton: 'C25/30', alfa: 1.5, lb: 150, fd: 2.0, beta: 1.2, zebro: false, bs: 70, ts: 10, ch: 15 };
-  return { zebro: false, bs: 70, ts: 10, ch: 15 };
+  if (typ === 'oparcie') return { podloze: 'beton', bp: 200, lp: 150, tp: 15, beton: 'C25/30', alfa: 1.5, lb: 150, fd: 2.0, beta: 1.2, zebro: false, bs: 70, ts: 10, ch: '' };
+  return { zebro: false, bs: 70, ts: 10, ch: '' };
 };
 W.spliceDefaults = function (sec, x) {
   const bf = sec ? Math.min(sec.bg || 150, sec.bd || 150) : 150, tf = sec ? Math.min(sec.tg || 10, sec.td || 10) : 10, h = sec ? sec.h : 300, r = sec ? sec.r || 0 : 0;

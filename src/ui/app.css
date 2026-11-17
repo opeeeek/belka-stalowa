@@ -805,3 +805,5 @@ table.ctab td.tk input[data-tick] { accent-color: var(--ok); cursor: default; }
 .v3cv:active { cursor: grabbing; }
 .v3tip { position: absolute; pointer-events: none; max-width: 300px; padding: 4px 8px; border-radius: 5px; background: var(--toastbg); color: var(--toastink); font-size: 12px; line-height: 1.35; box-shadow: var(--shadow); z-index: 3; }
 .elevbox .vhead { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 8px; }
+.stfdet { overflow-x: auto; margin: 4px 0 8px; }
+.stfdet svg { max-width: 100%; height: auto; }

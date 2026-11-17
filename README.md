@@ -39,6 +39,7 @@ Aplikacja do analizy i projektowania belek stalowych według Eurokodów, przygot
 - Wyboczenie przy ścinaniu z interakcją M–V (7.1), osobno w każdym panelu środnika (długość panelu a wynika z położenia żeber).
 - Siły skupione na środnik z interakcją F–M (7.2); siła w miejscu żebra przenoszona przez żebro.
 - Żebra poprzeczne środnika w dowolnych miejscach (obustronne / jednostronne, b<sub>s</sub>, t<sub>s</sub>) lub rozmieszczone co a, także w osiach podpór: sztywność (9.3.3), wyboczenie żebra z siłą od pola ścinania (9.13) i siłą skupioną (9.4), wyboczenie skrętne (9.2.1(8)), docisk; żebro w osi podpory działa jako żebro podporowe (9.4).
+- Wcięcia narożne żeber 45° (c × c) przy pasach od strony środnika – odpływ cynku i odpowietrzenie przy cynkowaniu zanurzeniowym (PN-EN ISO 14713-2) oraz ominięcie promienia wyokrąglenia / spoiny pas–środnik. Wymiar automatyczny c = ⌈max(20; r + 10)⌉ do 5 mm (blachownice: √2·a zamiast r) lub zadany; 0 – żebra bez wcięć (ostrzeżenie). Wcięcie zmniejsza szerokość docisku do b<sub>s</sub> − c i długość spoin żebro–środnik do h<sub>w</sub> − 2c; szczegół A na rysunku żebra, w widoku 3D, w raporcie i w zestawieniu materiałów.
 
 **Stateczność (PN-EN 1993-1-1, 6.3)**
 - M<sub>cr</sub> liczony MES dla rzeczywistego rozkładu momentu. Model uwzględnia wysokość przyłożenia obciążenia, monosymetrię (β<sub>z</sub>) i stężenia.

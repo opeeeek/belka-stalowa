@@ -123,7 +123,7 @@ D.scheme = function (S, R, o) {
     g += `<g class="${o.edit ? 'rst' : ''}" data-rst="${z.src}" opacity="${act ? 1 : 0.45}"><title>Stężenie ${z.typ} x = ${fmt(z.x / 1000, 2)} m (od etapu ${z.od + 1})</title><circle cx="${x}" cy="${yy}" r="6" fill="#ffffff" fill-opacity="0"/><circle cx="${x}" cy="${yy}" r="4.2" fill="#ffffff" stroke="${col}" stroke-width="1.6"/>${z.typ !== 'boczne' ? `<line x1="${x - 3}" y1="${yy - 3}" x2="${x + 3}" y2="${yy + 3}" stroke="${col}" stroke-width="1.4"/><line x1="${x - 3}" y1="${yy + 3}" x2="${x + 3}" y2="${yy - 3}" stroke="${col}" stroke-width="1.4"/>` : `<circle cx="${x}" cy="${yy}" r="1.4" fill="${col}"/>`}</g>`;
   });
   // żebra poprzeczne środnika
-  (R.zebra || []).forEach(z => { const x = X(z.x); g += `<g class="${o.edit ? 'stf' : ''}" data-stf="${z.src}"${o.edit ? ' style="cursor:pointer"' : ''}><title>Żebro środnika x = ${fmt(z.x / 1000, 2)} m (${z.strona === 'jedna' ? 'jednostronne' : 'obustronne'} ${fmt(z.bs, 0)}×${fmt(z.ts, 0)} mm)</title><rect x="${x - 4}" y="${yBeam - 10}" width="8" height="20" fill="#ffffff" fill-opacity="0"/><line x1="${x}" y1="${yBeam - 7}" x2="${x}" y2="${yBeam + 7}" stroke="#b5651d" stroke-width="2"/></g>`; });
+  (R.zebra || []).forEach(z => { const x = X(z.x); g += `<g class="${o.edit ? 'stf' : ''}" data-stf="${z.src}"${o.edit ? ' style="cursor:pointer"' : ''}><title>Żebro środnika x = ${fmt(z.x / 1000, 2)} m (${z.strona === 'jedna' ? 'jednostronne' : 'obustronne'} ${fmt(z.bs, 0)}×${fmt(z.ts, 0)} mm${z.c > 0 ? `, wcięcia 45° c = ${fmt(z.c, 0)} mm` : ''})</title><rect x="${x - 4}" y="${yBeam - 10}" width="8" height="20" fill="#ffffff" fill-opacity="0"/><line x1="${x}" y1="${yBeam - 7}" x2="${x}" y2="${yBeam + 7}" stroke="#b5651d" stroke-width="2"/></g>`; });
   // styki montażowe
   (S.styki || []).forEach((st2, j) => { const x = X(U.clamp(U.num(st2.x) * 1000, 0, L)); g += `<g class="${o.edit ? 'sty' : ''}" data-sty="${j}"${o.edit ? ' style="cursor:pointer"' : ''}><title>Styk montażowy S${j + 1} – x = ${fmt(U.num(st2.x), 2)} m</title><rect x="${x - 7}" y="${yBeam - 14}" width="14" height="28" fill="#ffffff" fill-opacity="0"/><line x1="${x - 2.5}" y1="${yBeam - 9}" x2="${x - 2.5}" y2="${yBeam + 9}" stroke="#b5651d" stroke-width="1.6"/><line x1="${x + 2.5}" y1="${yBeam - 9}" x2="${x + 2.5}" y2="${yBeam + 9}" stroke="#b5651d" stroke-width="1.6"/>${tx(x, yBeam - 12, 'S' + (j + 1), { fs: 9, w: 700, c: '#b5651d' })}</g>`; });
   // opis przekroju
@@ -392,6 +392,69 @@ D.joint = function (sec, w, o) {
 };
 const M0d = (d) => (BS.M.SRUBY[d] || { d: 16 }).d;
 
+/* ------------------------------------------------------------ szczegół żebra: przekrój z żebrami + szczegół A wcięcia narożnego 45° */
+// o: { bs, ts, c, strona ('obie' | 'jedna'), a (spoina pas–środnik – blachownice), tytul, stack (szczegół pod przekrojem – wąskie okna) }
+let stfSeq = 0;
+D.stiffDetail = function (sec, o) {
+  o = o || {};
+  if (!(sec.kind === 'I' || sec.kind === 'U')) return '';
+  const bs = +o.bs || 80, c = Math.max(0, +o.c || 0), h = sec.h, tw = sec.tw, tg = sec.tg, td = sec.td;
+  const yw0 = sec.kind === 'U' ? 0 : -tw / 2, yw1 = yw0 + tw, z1 = h - tg, z0 = td;
+  const sides = sec.kind === 'U' ? [1] : o.strona === 'jedna' ? [1] : [1, -1];
+  const plate = (s, cc) => { const yi = s > 0 ? yw1 : yw0, yo = yi + s * bs; return cc > 0 ? [[yi, z0 + cc], [yi + s * cc, z0], [yo, z0], [yo, z1], [yi + s * cc, z1], [yi, z1 - cc]] : [[yi, z0], [yo, z0], [yo, z1], [yi, z1]]; };
+  const SP = '#e6a35a', SPS = '#b5651d', WELD = '#c0262d';
+  // --- widok ogólny (przekrój poprzeczny w miejscu żebra)
+  const yLo = Math.min(sec.ymin, ...sides.map(s => (s > 0 ? yw1 + bs : yw0 - bs))), yHi = Math.max(sec.ymax, ...sides.map(s => (s > 0 ? yw1 + bs : yw0 - bs)));
+  const HV = 200, sc = HV / Math.max(h, (yHi - yLo) * 1.1), padT = 26, padL = 34;
+  const W1 = Math.max(130, (yHi - yLo) * sc + 2 * padL), F = 180, Wt = o.stack ? Math.max(W1, F + 118) : W1 + 26 + F + 110;
+  const cxO = o.stack ? Wt / 2 : W1 / 2;
+  const X = (y) => cxO + (y - (yLo + yHi) / 2) * sc, Y = (z) => padT + (h - z) * sc;
+  const pth = (pts, f) => pts.map((p, i) => (i ? 'L' : 'M') + f[0](p[0]).toFixed(1) + ' ' + f[1](p[1]).toFixed(1)).join(' ') + ' Z';
+  let g = tx(cxO, 14, 'Przekrój w miejscu żebra', { fs: 10.5, w: 600, c: '#3d4656' });
+  g += `<path d="${sec.rings.map(r => pth(r, [X, Y])).join(' ')}" fill="#c9d4e6" fill-rule="evenodd" stroke="#1b2230" stroke-width="1"/>`;
+  sides.forEach(s => { g += `<path d="${pth(plate(s, c), [X, Y])}" fill="${SP}" fill-opacity="0.75" stroke="${SPS}" stroke-width="1"/>`; });
+  g += dimV(X(yLo) - 12, Y(z0), Y(z1), `h_w = ${fmt(z1 - z0, 0)}`.replace('h_w', 'h<tspan font-size="8" dy="2">w</tspan><tspan dy="-2"></tspan>'));
+  const yb0 = yw1, yb1 = yw1 + bs;
+  g += dimH(X(yb0), X(yb1), Y(0) + 14, `b<tspan font-size="8" dy="2">s</tspan><tspan dy="-2"> = ${fmt(bs, 0)}</tspan>`, { below: true });
+  // znacznik szczegółu A
+  const ax = X(yw1 + Math.max(c, 6) * 0.5), ay = Y(z1 - Math.max(c, 6) * 0.5), ar = Math.max(9, Math.min(18, 2.2 * Math.max(c, 10) * sc));
+  g += `<circle cx="${ax}" cy="${ay}" r="${ar}" fill="none" stroke="#1d5bb8" stroke-width="1" stroke-dasharray="3 2"/>` + tx(ax + ar * 0.75 + 3, ay - ar * 0.75 - 2, 'A', { a: 'start', fs: 11, w: 700, c: '#1d5bb8' });
+  // --- szczegół A (powiększenie naroża żebro–pas–środnik)
+  const rr = sec.typ === 'spaw' ? 0 : (+sec.r || 0), zl = sec.typ === 'spaw' ? Math.SQRT2 * (+o.a || +sec.aw || 0) : 0;
+  const span = Math.max(3.4 * Math.max(c, 8), 2.6 * rr + 10, 50), k = F / span;
+  const x0 = o.stack ? 8 : W1 + 26, y0 = o.stack ? padT + h * sc + 62 : padT, yA = yw1 - 0.22 * span, zA = z1 + Math.min(tg, 0.2 * span) + 0.06 * span;
+  const XA = (y) => x0 + (y - yA) * k, YA = (z) => y0 + (zA - z) * k;
+  let d = '';
+  d += `<rect x="${XA(yA - span)}" y="${YA(h)}" width="${3 * span * k}" height="${tg * k}" fill="#c9d4e6" stroke="#1b2230" stroke-width="1"/>`;
+  d += `<rect x="${XA(yw0)}" y="${YA(z1)}" width="${tw * k}" height="${(z1 - z0) * k}" fill="#c9d4e6" stroke="#1b2230" stroke-width="1"/>`;
+  if (rr > 0) { const pts = [[yw1, z1]]; for (let i = 0; i <= 12; i++) { const t = Math.PI / 2 + (Math.PI / 2) * i / 12; pts.push([yw1 + rr + rr * Math.cos(t), z1 - rr + rr * Math.sin(t)]); } d += `<path d="${pth(pts, [XA, YA])}" fill="#c9d4e6" stroke="#1b2230" stroke-width="1"/>`; }
+  if (zl > 0) d += `<path d="${pth([[yw1, z1], [yw1 + zl, z1], [yw1, z1 - zl]], [XA, YA])}" fill="${WELD}" fill-opacity="0.55" stroke="${WELD}" stroke-width="0.8"/>`;
+  d += `<path d="${pth(plate(1, c), [XA, YA])}" fill="${SP}" fill-opacity="0.75" stroke="${SPS}" stroke-width="1.2"/>`;
+  // spoiny żebra (od strony widoku): ze środnikiem poniżej wcięcia, z pasem poza wcięciem
+  d += `<line x1="${XA(yw1) + 2}" y1="${YA(z1 - c) + 2}" x2="${XA(yw1) + 2}" y2="${YA(z1 - span)}" stroke="${WELD}" stroke-width="3"/>`;
+  d += `<line x1="${XA(yw1 + c) + 2}" y1="${YA(z1) + 2}" x2="${XA(yw1 + span)}" y2="${YA(z1) + 2}" stroke="${WELD}" stroke-width="3"/>`;
+  if (c > 0) {
+    // wymiary wcięcia c × c i kąt 45°
+    d += dimH(XA(yw1), XA(yw1 + c), YA(z1 - c) + 16, `c = ${fmt(c, 0)}`, { below: true, fs: 10 });
+    d += dimV(XA(yw1 + c) + 14 + 0.0, YA(z1 - c), YA(z1), `${fmt(c, 0)}`, { right: true, fs: 10 });
+    d += tx(XA(yw1 + 0.5 * c) + 8, YA(z1 - 0.5 * c) + 4, '45°', { a: 'start', fs: 10, w: 600, c: SPS });
+    // strzałka odpływu cynku przez wcięcie
+    const mx = XA(yw1 + 0.32 * c), my = YA(z1 - 0.32 * c);
+    d += `<path d="M ${mx + 26} ${my - 26} L ${mx + 3} ${my - 3}" stroke="#1d5bb8" stroke-width="1.3" fill="none"/><path d="M ${mx + 3} ${my - 3} l 7 -1.5 l -5.5 -5.5 z" fill="#1d5bb8"/>`;
+  }
+  const clip = `stfA${++stfSeq}`;
+  g += `<defs><clipPath id="${clip}"><rect x="${x0}" y="${y0}" width="${F}" height="${F}"/></clipPath></defs><g clip-path="url(#${clip})">${d}</g><rect x="${x0}" y="${y0}" width="${F}" height="${F}" fill="none" stroke="#1d5bb8" stroke-width="1" stroke-dasharray="4 2"/>`;
+  g += tx(x0 + F / 2, y0 - 10, 'Szczegół A – wcięcie narożne', { fs: 10.5, w: 600, c: '#1d5bb8' });
+  const sb = (t) => `<tspan font-size="8" dy="2">${t}</tspan><tspan dy="-2"></tspan>`;
+  const notes = (c > 0
+    ? [[`wcięcie 45° c × c = ${fmt(c, 0)} × ${fmt(c, 0)} mm (oba naroża przy pasach)`], ['odpływ cynku i odpowietrzenie przy cynkowaniu', 1], ['zanurzeniowym (PN-EN ISO 14713-2)', 1], [rr > 0 ? `omija promień wyokrąglenia r = ${fmt(rr, 0)} mm` : zl > 0 ? `omija spoinę pas–środnik (√2·a = ${fmt(zl, 1)} mm)` : ''], [`spoina żebro–środnik l = h${sb('w')} − 2c = ${fmt(z1 - z0 - 2 * c, 0)} mm`], [`docisk do pasa na szerokości b${sb('s')} − c = ${fmt(bs - c, 0)} mm`]]
+    : [['żebro bez wcięć narożnych – dopasowane do promienia / spoiny'], ['przy cynkowaniu zanurzeniowym wymagane wcięcia', 1], ['lub otwory odpływowe (PN-EN ISO 14713-2)', 1]]).filter(q => q[0]);
+  const yN = y0 + F + 16;
+  notes.forEach((q, i) => { g += tx(x0, yN + i * 13, q[0], { a: 'start', fs: 9.5, c: q[1] ? '#1d5bb8' : '#3d4656' }); });
+  const W = Wt, H = Math.max(padT + h * sc + 34, yN + notes.length * 13 + 4);
+  return svgOpen(W, H, `class="stfsvg"${o.tytul ? ` aria-label="${esc(o.tytul)}"` : ''}`) + g + '</svg>';
+};
+
 /* ------------------------------------------------------------ widok podłużny belki z połączeniami */
 D.elevation = function (S, R, o) {
   o = o || {};
@@ -435,7 +498,7 @@ D.elevation = function (S, R, o) {
   (md.stez || []).forEach(z => { const x = X(z.x); g += `<g class="rst" data-rst="${z.src}" style="cursor:pointer"><title>Stężenie ${z.typ} x = ${fmt(z.x / 1000, 2)} m</title><path d="M ${x - 6} ${yt - 14} L ${x + 6} ${yt - 14} L ${x} ${yt - 2} Z" fill="#1d5bb8"/><line x1="${x}" y1="${yt - 30}" x2="${x}" y2="${yt - 14}" stroke="#1d5bb8"/></g>`; });
   if ((md.ciagle || {}).pasG) g += `<line x1="${X(0)}" y1="${yt - 5}" x2="${X(L)}" y2="${yt - 5}" stroke="#1d5bb8" stroke-width="2" stroke-dasharray="3 3"/>`;
   // żebra pośrednie
-  (R.zebra || []).forEach(z => { const x = X(z.x); g += `<g class="stf" data-stf="${z.src}" style="cursor:pointer"><title>Żebro środnika x = ${fmt(z.x / 1000, 2)} m – ${z.strona === 'jedna' ? 'jednostronne' : 'obustronne'} ${fmt(z.bs, 0)}×${fmt(z.ts, 0)} mm (kliknij, aby zmienić)</title><rect x="${x - 5}" y="${yt}" width="10" height="${hs}" fill="#ffffff" fill-opacity="0"/><line x1="${x}" y1="${yt + tf}" x2="${x}" y2="${yb - tfd}" stroke="#b5651d" stroke-width="2.2"/></g>`; });
+  (R.zebra || []).forEach(z => { const x = X(z.x); g += `<g class="stf" data-stf="${z.src}" style="cursor:pointer"><title>Żebro środnika x = ${fmt(z.x / 1000, 2)} m – ${z.strona === 'jedna' ? 'jednostronne' : 'obustronne'} ${fmt(z.bs, 0)}×${fmt(z.ts, 0)} mm${z.c > 0 ? `, wcięcia 45° c = ${fmt(z.c, 0)} mm` : ''} (kliknij, aby zmienić)</title><rect x="${x - 5}" y="${yt}" width="10" height="${hs}" fill="#ffffff" fill-opacity="0"/><line x1="${x}" y1="${yt + tf}" x2="${x}" y2="${yb - tfd}" stroke="#b5651d" stroke-width="2.2"/></g>`; });
   // wymiary
   let y = yb + 72;
   const xs = [0].concat(md.sup.map(p => p.x)).concat([L]).filter((v, i, arr) => arr.indexOf(v) === i).sort((p, q) => p - q);
