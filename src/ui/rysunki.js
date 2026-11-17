@@ -455,6 +455,107 @@ D.stiffDetail = function (sec, o) {
   return svgOpen(W, H, `class="stfsvg"${o.tytul ? ` aria-label="${esc(o.tytul)}"` : ''}`) + g + '</svg>';
 };
 
+/* ------------------------------------------------------------ płyta podporowa z kotwami: rzut z góry i przekrój A–A */
+// w – węzeł oparcia; ko – wynik BS.KT.design (geometria, długość kotwy); o: { W }
+D.anchorViews = function (sec, w, ko, o) {
+  o = o || {};
+  if (!ko || !ko.geom) return { plan: '', sect: '' };
+  const g = ko.geom, k = g.k, d = g.d, H = g.H, L = ko.len, tg = Math.max(0, U.num(k.tg, 0)), hef = ko.hef;
+  const bf = sec.bd || sec.b || 100, td = sec.td || sec.t || 10, tw = sec.tw || sec.t || 6, lb = Math.min(U.num(w.lb, g.lp) || g.lp, g.lp);
+  const C = { conc: '#e4e6ea', concS: '#8a93a3', pl: '#e6a35a', plS: '#b5651d', beam: '#c9d4e6', beamS: '#1b2230', weld: '#c0262d', bolt: '#39414f', grout: '#cfc8bb', resin: '#c9a227', dim: '#3d4656' };
+  const Wd = o.W || 380;
+  // ---------------------------------------------------- rzut z góry (x – wzdłuż belki, w prawo ku przęsłu; y – w poprzek)
+  const bcK = g.bc > 0 ? g.bc : g.lp + 160, xC0 = g.bc > 0 ? -(g.bc / 2 + g.ec) : -(g.lp / 2 + 80), xC1 = xC0 + bcK;
+  const yHalf = g.lc > 0 ? g.lc / 2 : g.bp / 2 + 70;
+  const xEnd = g.lp / 2 - lb;                                    // czoło belki (oparcie na długości l_b od strony przęsła)
+  const xR = Math.max(xC1, g.lp / 2) + 90;                       // belka wychodzi poza podporę ku przęsłu
+  const xL = Math.min(xC0, -g.lp / 2) - 10;
+  const spanX = xR - xL, spanY = 2 * yHalf + 20;
+  const kP = Math.min((Wd - 90) / spanX, 230 / spanY);
+  const topPad = g.bc > 0 ? 66 : 30, ox = 62 - xL * kP, oy = topPad + (yHalf + 10) * kP;
+  const X = (x) => ox + x * kP, Y = (y) => oy - y * kP;
+  let p = '';
+  p += tx(Wd / 2, 14, 'Rzut z góry – płyta i kotwy', { fs: 10.5, w: 600, c: C.dim });
+  // podpora betonowa
+  p += `<rect x="${X(xC0)}" y="${Y(yHalf)}" width="${bcK * kP}" height="${2 * yHalf * kP}" fill="${C.conc}" stroke="${C.concS}" stroke-width="1" ${g.lc > 0 ? '' : 'stroke-dasharray="5 3"'}/>`;
+  if (!(g.lc > 0)) p += tx(X(xC0) + 4, Y(-yHalf) - 4, 'ściana (ciągła)', { a: 'start', fs: 9, c: '#7a8494' });
+  // płyta
+  p += `<rect x="${X(-g.lp / 2)}" y="${Y(g.bp / 2)}" width="${g.lp * kP}" height="${g.bp * kP}" fill="${C.pl}" fill-opacity="0.55" stroke="${C.plS}" stroke-width="1.2"/>`;
+  // pas dolny belki (nad płytą) i środnik
+  p += `<rect x="${X(xEnd)}" y="${Y(bf / 2)}" width="${(xR - xEnd) * kP}" height="${bf * kP}" fill="${C.beam}" fill-opacity="0.75" stroke="${C.beamS}" stroke-width="1"/>`;
+  p += `<line x1="${X(xEnd)}" y1="${Y(0)}" x2="${X(xR)}" y2="${Y(0)}" stroke="${C.beamS}" stroke-width="0.8" stroke-dasharray="8 3 2 3"/>`;
+  // spoiny pasa z blachą
+  if (U.num(w.aw, 0) > 0) [1, -1].forEach(s => { p += `<line x1="${X(xEnd)}" y1="${Y(s * bf / 2) + s * 1.8}" x2="${X(g.lp / 2)}" y2="${Y(s * bf / 2) + s * 1.8}" stroke="${C.weld}" stroke-width="2.6"/>`; });
+  // kotwy (podkładka, pręt, otwór owalny)
+  g.xs.forEach(x => g.ys.forEach(y => {
+    if (g.slot) p += `<rect x="${X(x) - (g.df / 2 + 15) * kP}" y="${Y(y) - g.df / 2 * kP}" width="${(g.df + 30) * kP}" height="${g.df * kP}" rx="${g.df / 2 * kP}" fill="#ffffff" stroke="${C.plS}"/>`;
+    p += `<circle cx="${X(x)}" cy="${Y(y)}" r="${H.dw / 2 * kP}" fill="#ffffff" fill-opacity="0.7" stroke="${C.bolt}" stroke-width="0.8"/><circle cx="${X(x)}" cy="${Y(y)}" r="${Math.max(2, d / 2 * kP)}" fill="${C.bolt}"/>`;
+  }));
+  // wymiary
+  const yTop = Y(Math.max(yHalf, g.bp / 2)) - 10;
+  p += Q.dimV(X(xL) - 26, Y(g.bp / 2), Y(-g.bp / 2), `b<tspan font-size="8" dy="2">p</tspan><tspan dy="-2"> = ${fmt(g.bp, 0)}</tspan>`);
+  p += Q.dimV(X(-g.lp / 2) - 10, Y(g.sB / 2), Y(-g.sB / 2), `${fmt(g.sB, 0)}`, { right: false });
+  p += Q.dimH(X(-g.lp / 2), X(g.lp / 2), Y(-Math.max(yHalf, g.bp / 2)) + 14, `l<tspan font-size="8" dy="2">p</tspan><tspan dy="-2"> = ${fmt(g.lp, 0)}</tspan>`, { below: true });
+  if (g.nL > 1) p += Q.dimH(X(g.xs[0]), X(g.xs[1]), Y(-g.sB / 2) + 16, `s<tspan font-size="8" dy="2">L</tspan><tspan dy="-2"> = ${fmt(g.sL, 0)}</tspan>`, { below: true, fs: 9.5 });
+  if (g.bc > 0) {
+    p += Q.dimH(X(xC0), X(xC1), yTop - 14, `b<tspan font-size="8" dy="2">c</tspan><tspan dy="-2"> = ${fmt(g.bc, 0)}</tspan>`);
+    p += Q.dimH(X(xC0), X(g.xs[0]), yTop, `${fmt(g.cxZ, 0)}`, { fs: 9.5 }) + Q.dimH(X(g.xs[g.xs.length - 1]), X(xC1), yTop, `${fmt(g.cxP, 0)}`, { fs: 9.5 });
+  }
+  p += tx(X(xR) - 2, Y(bf / 2) - 4, 'belka →', { a: 'end', fs: 9, c: '#4a5466' });
+  // linia przekroju A–A (w poprzek belki, przez pierwszy rząd kotew)
+  { const xa = X(g.xs[0]), ya = Y(Math.max(yHalf, g.bp / 2)) - 2, yb = Y(-Math.max(yHalf, g.bp / 2)) + 2; p += `<line x1="${xa}" y1="${ya}" x2="${xa}" y2="${yb}" stroke="#1d5bb8" stroke-width="0.9" stroke-dasharray="10 3 2 3"/>` + [[ya, -1], [yb, 1]].map(([yy, sg]) => `<path d="M ${xa} ${yy} l -9 0" stroke="#1d5bb8" stroke-width="1.6"/><path d="M ${xa - 9} ${yy} l 4 -3 l 0 6 z" fill="#1d5bb8"/>` + tx(xa - 14, yy + 4 * (sg > 0 ? 1 : 0) + (sg > 0 ? 6 : -2), 'A', { a: 'end', fs: 10, w: 700, c: '#1d5bb8' })).join(''); }
+  const Hp = oy + (yHalf + 10) * kP + 26;
+  const plan = svgOpen(Wd, Hp, 'class="anchsvg"') + p + '</svg>';
+
+  // ---------------------------------------------------- przekrój A–A (w poprzek belki, przez kotwy)
+  const top = tg + g.tp + H.tw + H.m + 2 * H.P, ztop = tg + g.tp + td + Math.max(60, 0.25 * (sec.h || 300));
+  const zbot = -(Math.min(g.hc < 5e4 ? g.hc : hef + 150, Math.max(hef + (k.typ === 'wbetonowane' ? (L.tAP || 10) + H.m + 40 : 60), hef + 40)));
+  const yW = (g.lc > 0 ? g.lc / 2 : g.bp / 2 + 80);
+  const kS = Math.min((Wd - 130) / (2 * yW), 300 / (Math.max(ztop, top) - zbot));
+  const ox2 = 30 + yW * kS, oz = 34 + Math.max(ztop, top) * kS;
+  const XS = (y) => ox2 + y * kS, ZS = (z) => oz - z * kS;
+  let s = tx(Wd / 2, 14, 'Przekrój A–A – kotwa w betonie', { fs: 10.5, w: 600, c: C.dim });
+  // beton
+  s += `<rect x="${XS(-yW)}" y="${ZS(0)}" width="${2 * yW * kS}" height="${-zbot * kS}" fill="${C.conc}" stroke="${C.concS}"/>`;
+  for (let i = 0; i < 2 * yW * kS / 14; i++) { const x0 = XS(-yW) + i * 14; s += `<line x1="${x0}" y1="${ZS(0) + 3}" x2="${x0 + 6}" y2="${ZS(0) + 9}" stroke="#b7bdc8" stroke-width="0.6"/>`; }
+  if (!(g.hc < 5e4) || g.hc > -zbot + 1) s += `<path d="M ${XS(-yW)} ${ZS(zbot)} l 20 -5 l 10 10 l 20 -5" fill="none" stroke="${C.concS}"/>`;
+  // podlewka, płyta
+  if (tg > 0) s += `<rect x="${XS(-g.bp / 2 - 8)}" y="${ZS(tg)}" width="${(g.bp + 16) * kS}" height="${tg * kS}" fill="${C.grout}" stroke="#9a907f" stroke-width="0.7"/>`;
+  s += `<rect x="${XS(-g.bp / 2)}" y="${ZS(tg + g.tp)}" width="${g.bp * kS}" height="${g.tp * kS}" fill="${C.pl}" stroke="${C.plS}" stroke-width="1.1"/>`;
+  // belka – pas dolny i środnik (urwany)
+  const zb = tg + g.tp;
+  s += `<rect x="${XS(-bf / 2)}" y="${ZS(zb + td)}" width="${bf * kS}" height="${td * kS}" fill="${C.beam}" stroke="${C.beamS}"/>`;
+  s += `<rect x="${XS(-tw / 2)}" y="${ZS(ztop)}" width="${Math.max(1.5, tw * kS)}" height="${(ztop - zb - td) * kS}" fill="${C.beam}" stroke="${C.beamS}"/>`;
+  s += `<path d="M ${XS(-tw / 2) - 8} ${ZS(ztop) + 3} l 6 -6 l 4 6 l 6 -6 l 6 6" fill="none" stroke="${C.beamS}" stroke-width="0.8"/>`;
+  if (U.num(w.aw, 0) > 0) [1, -1].forEach(sg => { const a = U.num(w.aw) * kS; s += `<path d="M ${XS(sg * bf / 2)} ${ZS(zb)} l ${sg * a * 1.3} 0 l ${-sg * a * 1.3} ${-a * 1.3} z" fill="${C.weld}"/>`; });
+  // kotwy
+  g.ys.forEach((y, j) => {
+    const xa = XS(y), dd = Math.max(2, d * kS);
+    if (k.typ === 'wklejane') s += `<rect x="${xa - (L.dDrill || d + 4) / 2 * kS}" y="${ZS(0)}" width="${(L.dDrill || d + 4) * kS}" height="${hef * kS}" fill="${C.resin}" fill-opacity="0.75"/>`;
+    const zBot = k.typ === 'wbetonowane' ? -(hef + (L.tAP || 10) + H.m) : k.typ === 'rozporowe' ? -(hef + 0.5 * d) : -hef;
+    s += `<rect x="${xa - dd / 2}" y="${ZS(top)}" width="${dd}" height="${(top - zBot) * kS}" fill="${C.bolt}"/>`;
+    for (let z = 0; z > zBot + 4; z -= Math.max(3, H.P * 2)) { /* gwint – kreski */ s += `<line x1="${xa - dd / 2}" y1="${ZS(z)}" x2="${xa + dd / 2}" y2="${ZS(z - 1)}" stroke="#6b7385" stroke-width="0.4"/>`; }
+    if (k.typ === 'rozporowe') s += `<path d="M ${xa - dd / 2} ${ZS(-hef + 0.6 * d)} L ${xa - dd / 2 - 3} ${ZS(-hef)} L ${xa + dd / 2 + 3} ${ZS(-hef)} L ${xa + dd / 2} ${ZS(-hef + 0.6 * d)} Z" fill="#8a93a3"/>`;
+    if (k.typ === 'wbetonowane') { const dh = (ko.T && ko.T.dh) || 3 * d; s += `<rect x="${xa - dh / 2 * kS}" y="${ZS(-hef)}" width="${dh * kS}" height="${(L.tAP || 10) * kS}" fill="${C.pl}" stroke="${C.plS}"/><rect x="${xa - 0.8 * d * kS}" y="${ZS(-hef - (L.tAP || 10))}" width="${1.6 * d * kS}" height="${H.m * kS}" fill="${C.bolt}"/>`; }
+    // podkładka i nakrętka
+    s += `<rect x="${xa - H.dw / 2 * kS}" y="${ZS(zb + H.tw)}" width="${H.dw * kS}" height="${Math.max(1.2, H.tw * kS)}" fill="#8a93a3" stroke="${C.bolt}" stroke-width="0.5"/>`;
+    s += `<rect x="${xa - 0.8 * d * kS}" y="${ZS(zb + H.tw + H.m)}" width="${1.6 * d * kS}" height="${H.m * kS}" fill="${C.bolt}"/>`;
+    if (j === 1) {
+      // wymiary: h_ef i L
+      s += Q.dimV(xa + Math.max(18, H.dw * kS / 2 + 10), ZS(0), ZS(-hef), `h<tspan font-size="8" dy="2">ef</tspan><tspan dy="-2"> = ${fmt(hef, 0)}</tspan>`, { right: true, fs: 9.5 });
+      s += Q.dimV(xa + Math.max(18, H.dw * kS / 2 + 10) + 62, ZS(top), ZS(zBot), `L = ${fmt(L.Lr, 0)}`, { right: true, fs: 9.5 });
+    }
+  });
+  s += Q.dimH(XS(g.ys[0]), XS(g.ys[1]), ZS(zbot) + 14, `s<tspan font-size="8" dy="2">B</tspan><tspan dy="-2"> = ${fmt(g.sB, 0)}</tspan>`, { below: true });
+  s += tx(XS(-g.bp / 2) - 4, ZS(tg + g.tp / 2) + 3, `t<tspan font-size="8" dy="2">p</tspan><tspan dy="-2"> = ${fmt(g.tp, 0)}</tspan>`, { a: 'end', fs: 9, c: C.plS });
+  if (tg > 0) s += tx(XS(-g.bp / 2) - 4, ZS(tg / 2) + 9, `t<tspan font-size="8" dy="2">g</tspan><tspan dy="-2"> = ${fmt(tg, 0)}</tspan>`, { a: 'end', fs: 9, c: '#7a6f5c' });
+  const lab = `${g.n} × ${esc(k.d)} kl. ${esc(k.kl)} – ${esc(BS.KT.KROTKO[k.typ] || k.typ)}, L = ${fmt(L.Lr, 0)} mm${L.h0 ? `, otwór Ø${fmt(L.dDrill, 0)} × ${fmt(L.h0, 0)}` : ''}`;
+  const Hs = ZS(zbot) + 52;
+  s += tx(Wd / 2, Hs - 6, lab, { fs: 9.5, c: C.dim });
+  const sect = svgOpen(Wd, Hs, 'class="anchsvg"') + s + '</svg>';
+  return { plan, sect };
+};
+
 /* ------------------------------------------------------------ widok podłużny belki z połączeniami */
 D.elevation = function (S, R, o) {
   o = o || {};

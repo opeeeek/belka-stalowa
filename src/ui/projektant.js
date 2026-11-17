@@ -33,7 +33,7 @@ function ctxCur() {
 }
 const checksOf = (c) => {
   if (c.o && c.o.checks) return c.o.checks;
-  if (c.rp && c.rp.checks) return c.rp.checks.map(q => ({ grp: /Żebro/.test(q.n) ? 'Żebra' : /płyty|Docisk płyty/.test(q.n) ? 'Płyta podporowa' : /środnika/.test(q.n) ? 'Środnik belki' : 'Podpora', n: q.n, ref: q.ref, Ed: q.Ed, Rd: q.Rd, unit: q.unit, u: q.util, f: q.f || (q.d && q.d.f) || '', status: q.status }));
+  if (c.rp && c.rp.checks) return c.rp.checks.map(q => ({ grp: /^Kotwy|Kotwy płyty|kotwy:/.test(q.n) ? 'Kotwy (PN-EN 1992-4)' : /^Blacha podstawy|blacha podstawy:/.test(q.n) ? 'Blacha podstawy' : /^Spoiny belka/.test(q.n) ? 'Spoiny belka–blacha' : /Żebro/.test(q.n) ? 'Żebra' : /płyty|Docisk płyty/.test(q.n) ? 'Płyta podporowa' : /środnika/.test(q.n) ? 'Środnik belki' : 'Podpora', n: q.n, ref: q.ref, Ed: q.Ed, Rd: q.Rd, unit: q.unit, u: q.util, f: q.f || (q.d && q.d.f) || '', status: q.status }));
   return [];
 };
 const stOf = (u) => (u === null || u === undefined ? 'info' : !isFinite(u) || u > 1 + 1e-9 ? 'fail' : 'ok');
@@ -130,7 +130,7 @@ function viewsHTML(c, Wv) {
   const sec = R().sec;
   if (c.kind === 'styk') { if (c.w.typ === 'spawany') return `<div class="jview">${D.section(sec, { size: 260 })}</div><p class="hint">Styk spawany czołowy – spoiny z pełnym przetopem na całym obwodzie przekroju.</p>`; const v = D.spliceViews(sec, c.w, c.o, { W: Wv }); return `<div class="jview">${v.elev}</div><div class="jview">${v.sect}</div>`; }
   const t = c.w.typ;
-  if (t === 'oparcie' || t === 'brak') return `<div class="jview">${D.joint(sec, c.w, { W: 380, H: 280 })}</div>`;
+  if (t === 'oparcie' || t === 'brak') { const ko = c.rp && c.rp.kotwy, v = ko ? D.anchorViews(sec, c.w, ko, { W: Math.min(Wv || 420, 460) }) : null; return `<div class="jview">${D.joint(sec, c.w, { W: 380, H: 280 })}</div>${v ? `<div class="jview">${v.plan}</div><div class="jview">${v.sect}</div>` : ''}`; }
   if (!c.o) return '<p class="hint">Brak wyniku – sprawdź komunikaty (np. rodzaj przekroju).</p>';
   const v = D.jointViews(sec, c.w, c.o, { W: Wv, H: 380 });
   return `<div class="jview">${v.elev}</div>${v.sect ? `<div class="jview">${v.sect}</div>` : ''}`;
@@ -208,6 +208,7 @@ A.jointDesigner = function (sel) {
     m.style.display = 'flex';
     $('#jdForm', m).scrollTop = keep;
     A.bindFields($('#jdForm', m), (re) => { const c2 = ctxCur(); if (c2) syncLayout(c2); if (re) { A.recalcNow(); draw(); } });
+    A.bindAnchorFields($('#jdForm', m), draw);
     $$('[data-jt]', m).forEach(b => b.addEventListener('click', () => {
       const t = b.dataset.jt, st = S();
       if (c.kind === 'styk') { st.styki[cur.styk].typ = t; }

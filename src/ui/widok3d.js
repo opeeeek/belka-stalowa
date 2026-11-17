@@ -15,7 +15,7 @@
 const BS = window.BS, U = BS.U, Q = BS.Q, A = BS.A, M = BS.M, P = BS.P;
 const V3 = BS.V3 = {};
 const { esc, fmt } = Q;
-const COL = { beam: [150, 170, 200], plate: [230, 163, 90], angle: [196, 128, 64], bolt: [70, 76, 90], weld: [200, 50, 50], col: [176, 184, 196], conc: [205, 199, 186], mur: [190, 120, 92], stiff: [214, 150, 80], brace: [120, 90, 190], tmp: [235, 160, 40], slab: [190, 190, 185], cover: [235, 175, 100] };
+const COL = { washer: [150, 156, 168], grout: [196, 188, 172], beam: [150, 170, 200], plate: [230, 163, 90], angle: [196, 128, 64], bolt: [70, 76, 90], weld: [200, 50, 50], col: [176, 184, 196], conc: [205, 199, 186], mur: [190, 120, 92], stiff: [214, 150, 80], brace: [120, 90, 190], tmp: [235, 160, 40], slab: [190, 190, 185], cover: [235, 175, 100] };
 let cam = null;                       // stan kamery – zachowany między przeliczeniami
 let opts = (() => { try { return Object.assign({ slab: false, sup: true, xray: false }, JSON.parse(localStorage.getItem('bs.v3') || '{}')); } catch (e) { return { slab: false, sup: true, xray: false }; } })();
 
@@ -186,8 +186,30 @@ function build(S, R) {
     // oparcie (płyta / mur / beton / element stalowy) – także podpory pośrednie
     const lp = w.typ === 'oparcie' ? U.num(w.lp, 150) : Math.max(100, U.num((S.podpory[i] || {}).ss, 100)), bp = w.typ === 'oparcie' ? U.num(w.bp, 200) : bd + 60;
     let zb = 0;
-    if (w.typ === 'oparcie' && w.podloze !== 'stal') { const tp = U.num(w.tp, 15); sc.box(p.x - lp / 2, p.x + lp / 2, ywc - bp / 2, ywc + bp / 2, -tp, 0, COL.plate, ob); zb = -tp; }
-    if (w.typ === 'oparcie' && w.podloze !== 'stal') sc.box(p.x - lp / 2 - 120, p.x + lp / 2 + 120, ywc - bp / 2 - 150, ywc + bp / 2 + 150, zb - 320, zb, w.podloze === 'mur' ? COL.mur : COL.conc, ob);
+    const ko = rp.kotwy, kg = ko && ko.geom;
+    if (w.typ === 'oparcie' && w.podloze !== 'stal') {
+      const tp = U.num(w.tp, 15); sc.box(p.x - lp / 2, p.x + lp / 2, ywc - bp / 2, ywc + bp / 2, -tp, 0, COL.plate, ob); zb = -tp;
+      const tg = kg ? Math.max(0, U.num(kg.k.tg, 0)) : 0;
+      if (tg > 0) { sc.box(p.x - lp / 2 - 8, p.x + lp / 2 + 8, ywc - bp / 2 - 8, ywc + bp / 2 + 8, zb - tg, zb, COL.grout, ob); zb -= tg; }
+    }
+    if (w.typ === 'oparcie' && w.podloze !== 'stal') {
+      // podpora: wymiary z węzła (b_c w kierunku belki, l_c w poprzek, h_c) lub umowne
+      const bc = U.num(w.bc, 0), lc = U.num(w.lc, 0), hc = U.num(w.hc, 0), ec = U.num(w.ec, 0);
+      const xa = bc > 0 ? p.x + s * (-(bc / 2 + ec)) : p.x - lp / 2 - 120, xb = bc > 0 ? p.x + s * (bc / 2 - ec) : p.x + lp / 2 + 120;
+      const yh = lc > 0 ? lc / 2 : bp / 2 + 150, hh = hc > 0 ? Math.min(hc, 900) : 320;
+      sc.box(Math.min(xa, xb), Math.max(xa, xb), ywc - yh, ywc + yh, zb - hh, zb, w.podloze === 'mur' ? COL.mur : COL.conc, ob, opts.xray ? 0.45 : 1);
+    }
+    // kotwy płyty (pręt, podkładka, nakrętka) – część w betonie widoczna przy belce przezroczystej
+    if (kg && w.typ === 'oparcie') {
+      const kob = sc.o(`Podpora ${p.id} – kotwy ${BS.KT.txt(w)}, L = ${fmt(ko.len.Lr, 0)} mm`, () => A.supportPopup(i, 'anchors'), { kind: 'sup', x: p.x });
+      const d = kg.d, H = kg.H, hef = ko.hef, zc = zb, zBot = zc - hef - (kg.k.typ === 'wbetonowane' ? (ko.len.tAP || 10) + H.m : 0);
+      kg.xs.forEach(x0 => kg.ys.forEach(y0 => {
+        const x = p.x + s * x0, y = ywc + y0;
+        sc.prism([x, y, opts.xray ? zBot : zc], [x, y, H.tw + H.m + 2 * H.P], d / 2, 8, COL.bolt, kob, false);   // część w betonie – tylko w widoku przezroczystym
+        sc.prism([x, y, 0], [x, y, H.tw], H.dw / 2, 12, COL.washer, kob, false);
+        sc.prism([x, y, H.tw], [x, y, H.tw + H.m], 0.95 * d, 6, COL.bolt, kob, true, Math.PI / 6);
+      }));
+    }
     else { const bf2 = 160, hz = 260; sc.box(p.x - bf2 / 2, p.x + bf2 / 2, ywc - 500, ywc + 500, -12, 0, COL.col, ob, 1, 1); sc.box(p.x - 4, p.x + 4, ywc - 500, ywc + 500, -hz + 12, -12, COL.col, ob); sc.box(p.x - bf2 / 2, p.x + bf2 / 2, ywc - 500, ywc + 500, -hz, -hz + 12, COL.col, ob); }
   });
   // podpory montażowe

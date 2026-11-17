@@ -1,7 +1,7 @@
 // Buduje jeden samodzielny plik dist/BelkaStal.html (bez zależności zewnętrznych).
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-const ENGINE = ['core', 'normy', 'materialy', 'przekroje', 'mes', 'statyka', 'kombinacje', 'nosnosc', 'statecznosc', 'polaczenia', 'wezly', 'dodatkowe', 'projekt'].map(f => `src/engine/${f}.js`);
+const ENGINE = ['core', 'normy', 'materialy', 'przekroje', 'mes', 'statyka', 'kombinacje', 'nosnosc', 'statecznosc', 'polaczenia', 'wezly', 'kotwy', 'dodatkowe', 'projekt'].map(f => `src/engine/${f}.js`);
 const UI = ['baza', 'rysunki', 'rys_wezly', 'objasnienia', 'raport', 'odt', 'app', 'okna', 'projektant', 'widok3d', 'widoki'].map(f => `src/ui/${f}.js`);
 const read = (p) => readFileSync(p, 'utf8');
 const css = read('src/ui/app.css');

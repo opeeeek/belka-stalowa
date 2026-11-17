@@ -6,7 +6,7 @@
    ===================================================================== */
 (function (root) {
 'use strict';
-const BS = root.BS, U = BS.U, N = BS.N, M = BS.M, P = BS.P, S = BS.S, K = BS.K, R = BS.R, T = BS.T, C = BS.C, X = BS.X, F = BS.FE, W = BS.W;
+const BS = root.BS, U = BS.U, N = BS.N, M = BS.M, P = BS.P, S = BS.S, K = BS.K, R = BS.R, T = BS.T, C = BS.C, X = BS.X, F = BS.FE, W = BS.W, KT = BS.KT;
 const J = BS.J = {};
 
 J.defaultState = function () {
@@ -17,7 +17,7 @@ J.defaultState = function () {
     geom: { przesla: [6.0], wspL: 0, wspP: 0 },
     podpory: [
       { typ: 'przegub', ltb: 'widelkowe', ss: 0, c: 0, wezel: { typ: 'blacha_czolowa', hp: 200, bp: 150, tp: 10, nr: 2, d: 'M20', kl: '8.8', e1: 40, p1: 120, e2: 30, p3: 90, a: 5, gatP: 'S235', sup: 'pas_slupa', tsup: 12, supGat: 'S355', gwint: true, otw: 'normalne', Nt: 0 } },
-      { typ: 'przegub', ltb: 'widelkowe', ss: 150, c: 50, wezel: { typ: 'oparcie', podloze: 'beton', bp: 200, lp: 150, tp: 15, beton: 'C25/30', alfa: 1.5, lb: 150, zebro: false, bs: 70, ts: 10, ch: '' } }
+      { typ: 'przegub', ltb: 'widelkowe', ss: 150, c: 50, wezel: { typ: 'oparcie', podloze: 'beton', bp: 280, lp: 150, tp: 15, beton: 'C25/30', alfa: '', lb: 150, zebro: false, bs: 70, ts: 10, ch: '', bc: 300, lc: 0, hc: 400, ec: 0, aw: 4, Hx: 0, Hy: 0, Nt: 0, kotwy: { on: true, typ: 'wklejane', d: 'M20', kl: '5.8', nL: 1, sB: 210, sL: 100, hef: 160, tauCr: 5, tauUcr: 9, NRkp: '', dh: '', ginst: '', otw: 'normalne', tg: 10, rysy: true, zbrKr: false, zbrGes: false, utw: false } } }
     ],
     podporyTymczasowe: [],
     przekroj: { typ: 'walc', seria: 'IPE', nr: 300 },
@@ -371,7 +371,8 @@ J.supports = function (st, md, an, combos, sec, base, mat, ndp, env, out) {
     const Rmin = Math.min(...q.map(z => z.Rmin));
     if (Rmin < 0) {
       const anch = p.wezel && ['blacha_czolowa', 'blacha_zebrowa', 'katowniki', 'spawane'].includes(p.wezel.typ);
-      r.checks.push(BS.check({ id: `${p.id}-EQU`, grp, n: 'Odrywanie podpory (EQU) – wymagane zakotwienie', ref: 'PN-EN 1990 6.4.3.1, tabl. A1.2(A)', Ed: -Rmin, Rd: null, unit: 'F', util: null, forceStatus: anch ? 'warn' : 'fail', info: false, x: p.x, combo: 'EQU: 1,10/0,90·G + 1,5·Q', note: anch ? 'Siłę odrywającą musi przenieść połączenie (sprawdź śruby na rozciąganie).' : 'Oparcie bez zakotwienia – zaprojektuj kotwienie na siłę odrywającą.' }));
+      const kotw = J.hasAnchors(p.wezel);
+      r.checks.push(BS.check({ id: `${p.id}-EQU`, grp, n: 'Odrywanie podpory (EQU) – wymagane zakotwienie', ref: 'PN-EN 1990 6.4.3.1, tabl. A1.2(A)', Ed: -Rmin, Rd: null, unit: 'F', util: null, forceStatus: kotw ? 'ok' : anch ? 'warn' : 'fail', info: false, x: p.x, combo: 'EQU: 1,10/0,90·G + 1,5·Q', note: kotw ? 'Siłę odrywającą przenoszą kotwy płyty podporowej – sprawdzenia kotew (PN-EN 1992-4) i blachy podstawy poniżej.' : anch ? 'Siłę odrywającą musi przenieść połączenie (sprawdź śruby na rozciąganie).' : 'Oparcie bez zakotwienia – zaprojektuj kotwienie na siłę odrywającą (Płyta podporowa → Kotwy).' }));
     }
     const isEnd = !p.tymcz && ((p.idx === 0 && md.wL === 0) || (p.idx === md.sup.length - 1 && md.wP === 0));
     const w = p.wezel || { typ: 'brak' };
@@ -399,10 +400,21 @@ J.supports = function (st, md, an, combos, sec, base, mat, ndp, env, out) {
       }
     }
     if (w.typ === 'oparcie' && w.podloze !== 'stal' && Rmax > 0) {
-      const bp = C.bearingPlate(sec, mat, ndp, { podloze: w.podloze, bp: U.num(w.bp), lp: U.num(w.lp), tp: U.num(w.tp), beton: w.beton, alfa: w.alfa, fd: w.fd, beta: w.beta, lb: U.num(w.lb, U.num(w.lp)) }, Rmax);
+      const bp = C.bearingPlate(sec, mat, ndp, { podloze: w.podloze, bp: U.num(w.bp), lp: U.num(w.lp), tp: U.num(w.tp), beton: w.beton, alfa: w.alfa, fd: w.fd, beta: w.beta, lb: U.num(w.lb, U.num(w.lp)), bc: U.num(w.bc, 0), lc: U.num(w.lc, 0), hc: U.num(w.hc, 0), ec: U.num(w.ec, 0) }, Rmax);
       r.plyta = bp;
       bp.checks.forEach((c, k) => r.checks.push(BS.check({ id: `${p.id}-B${k}`, grp, n: c.n, ref: c.ref, Ed: c.Ed, Rd: c.Rd, unit: 'F', util: c.u, x: p.x, combo: cMax !== null ? combos[cMax].opis : '', d: c, f: c.f })));
       bp.uwagi.forEach(u => out.warnings.push(`Podpora ${p.id}: ${u}`));
+    }
+    // kotwienie płyty podporowej w betonie (PN-EN 1992-4) i blacha podstawy przy odrywaniu
+    if (J.hasAnchors(w) && sec.kind !== 'L') {
+      const F2 = J.anchorForces(w, p, etapy, env, q);
+      try {
+        const ko = KT.design({ sec, mat, ndp }, w, F2);
+        r.kotwy = ko; r.kotwyF = F2;
+        J.jointChecks(ko, `${p.id}-K`, grp, p.x, F2.opis).forEach(c => r.checks.push(c));
+        if (!(F2.N > 0 || F2.Vx > 0 || F2.Vy > 0)) r.checks.push(BS.check({ id: `${p.id}-K0`, grp, n: `Kotwy płyty podporowej (${KT.txt(w)}) – konstrukcyjne: brak siły odrywającej i poziomej w kombinacjach SGN`, ref: 'PN-EN 1992-4', Ed: null, Rd: null, unit: 'F', util: null, info: true, x: p.x, combo: F2.opis }));
+        ko.uwagi.forEach(u => out.warnings.push(`Podpora ${p.id}: ${u}`));
+      } catch (e) { out.errors.push(`Podpora ${p.id} – kotwy: ${e.message}`); }
     }
     if (conn && Rmax > 0) {
       const res2 = J.jointRun(st, sec, mat, ndp, base, p, w, { Rmax, Mmax, Rk: r.Rk, typ: p.typ }, grp, cMax !== null ? combos[cMax].opis : '', out);
@@ -415,6 +427,25 @@ J.supports = function (st, md, an, combos, sec, base, mat, ndp, env, out) {
 };
 
 
+
+/* ---------------------------------------------------------- kotwy płyty podporowej */
+J.hasAnchors = (w) => !!(w && w.typ === 'oparcie' && w.podloze === 'beton' && w.kotwy && w.kotwy.on !== false);
+// siły na grupę kotew: odrywanie (min. reakcja SGN lub EQU), V_x – siła osiowa belki (podpora nieprzesuwna), V_y – reakcja pozioma
+// w poprzek belki; + siły dodatkowe zadane w węźle (stężenia, temperatura, siły montażowe)
+J.anchorForces = function (w, p, etapy, env, equ) {
+  let RminS = Infinity, Nax = 0, Ry = 0;
+  etapy.forEach(e => { const q = env[e].R[p.id]; if (q) { if (isFinite(q.min)) RminS = Math.min(RminS, q.min); Ry = Math.max(Ry, q.Rymax || 0); } if (isFinite(env[e].Nmax)) Nax = Math.max(Nax, Math.abs(env[e].Nmax), Math.abs(env[e].Nmin)); });
+  const RminE = (equ || []).length ? Math.min(...equ.map(z => z.Rmin)) : Infinity;
+  const Nsgn = Math.max(0, isFinite(RminS) ? -RminS : 0), Nequ = Math.max(0, isFinite(RminE) ? -RminE : 0);
+  const Nt = Math.max(0, U.num(w.Nt, 0)) * 1e3, Hx = Math.abs(U.num(w.Hx, 0)) * 1e3, Hy = Math.abs(U.num(w.Hy, 0)) * 1e3;
+  const VxN = p.przesuwna ? 0 : Nax;
+  const parts = [];
+  if (Nsgn > 0 || Nequ > 0) parts.push(`odrywanie: max(SGN ${U.fmt(Nsgn / 1e3, 1)}; EQU ${U.fmt(Nequ / 1e3, 1)}) kN`);
+  if (VxN > 0) parts.push(`V_x = |N_Ed| belki = ${U.fmt(VxN / 1e3, 1)} kN (podpora nieprzesuwna)`);
+  if (Ry > 0) parts.push(`V_y = reakcja pozioma ${U.fmt(Ry / 1e3, 1)} kN`);
+  if (Nt || Hx || Hy) parts.push(`siły dodatkowe: N_t = ${U.fmt(Nt / 1e3, 1)}, H_x = ${U.fmt(Hx / 1e3, 1)}, H_y = ${U.fmt(Hy / 1e3, 1)} kN`);
+  return { N: Math.max(Nsgn, Nequ) + Nt, Vx: VxN + Hx, Vy: Ry + Hy, Nsgn, Nequ, VxN, Ry, Nt, Hx, Hy, opis: parts.join('; ') || 'brak sił w kombinacjach – kotwy konstrukcyjne' };
+};
 
 /* ---------------------------------------------------------- żebra poprzeczne środnika */
 // lista żeber: zadane w punktach (st.zebraSrodnika) + rozmieszczone co a w przęsłach (st.analiza.zebraRozstaw)
@@ -521,12 +552,12 @@ J.jointForces = function (w, info) {
   return { V: info.Rmax, Nt: Math.max(0, U.num(w.Nt)) * 1e3, N: 0, M: w.typ === 'spawane' && info.typ === 'utwierdzenie' ? info.Mmax : 0, Vser };
 };
 J.jointCtx = (sec, mat, ndp, base) => ({ sec, mat, ndp: Object.assign({ gM3: 1.25, gM3ser: 1.1 }, ndp), base });
-const UNIT = { F: 'F', M: 'M', '-': '-', MPa: 'MPa', mm: 'mm' };
+const UNIT = { F: 'F', M: 'M', '-': '-', MPa: 'MPa', mm: 'mm', q: 'q' };
 J.jointChecks = function (o, idp, grp, x, combo) {
   const out = [];
   o.checks.forEach((c, k) => out.push(BS.check({ id: `${idp}-C${k}`, grp, n: `${c.grp}: ${c.n}`, ref: c.ref, Ed: c.Ed, Rd: c.Rd, unit: UNIT[c.unit] || 'F', util: c.u, x, combo, d: c, f: c.f })));
-  o.detalFail.forEach((d, k) => out.push(BS.check({ id: `${idp}-D${k}`, grp, n: `Konstrukcja – ${d.el}: ${d.n}`, ref: 'PN-EN 1993-1-8 tabl. 3.3', Ed: d.v, Rd: d.lim, unit: 'mm', util: d.rel === '≥' ? d.lim / Math.max(d.v, 1e-9) : d.v / Math.max(d.lim, 1e-9), inverse: d.rel === '≥', d })));
-  o.zalFail.forEach((d, k) => out.push(BS.check({ id: `${idp}-Z${k}`, grp, n: `Zalecenie – ${d.el}: ${d.n}`, ref: 'SCI P358 / dobra praktyka', Ed: d.v, Rd: d.lim, unit: 'mm', util: null, forceStatus: 'warn', inverse: d.rel === '≥', d, note: 'Zalecenie konstrukcyjne (ciągliwość, montaż, trwałość) – nie jest warunkiem nośności.' })));
+  o.detalFail.forEach((d, k) => out.push(BS.check({ id: `${idp}-D${k}`, grp, n: `Konstrukcja – ${d.el}: ${d.n}`, ref: d.ref || 'PN-EN 1993-1-8 tabl. 3.3', Ed: d.v, Rd: d.lim, unit: 'mm', util: d.rel === '≥' ? d.lim / Math.max(d.v, 1e-9) : d.v / Math.max(d.lim, 1e-9), inverse: d.rel === '≥', d })));
+  o.zalFail.forEach((d, k) => out.push(BS.check({ id: `${idp}-Z${k}`, grp, n: `Zalecenie – ${d.el}: ${d.n}`, ref: d.ref || 'SCI P358 / dobra praktyka', Ed: d.v, Rd: d.lim, unit: 'mm', util: null, forceStatus: 'warn', inverse: d.rel === '≥', d, note: 'Zalecenie konstrukcyjne (ciągliwość, montaż, trwałość) – nie jest warunkiem nośności.' })));
   return out;
 };
 J.jointRun = function (st, sec, mat, ndp, base, p, w, info, grp, combo, out) {
@@ -752,6 +783,14 @@ J.dobierzWezly = function (st0, r, eta) {
           if (o.checks.every(c => c.u <= eta + 1e-9)) { Object.assign(w, { bp, lp, tp, lb: lp }); ok = true; break; } } if (ok) break; }
         log.push(ok ? `Podpora ${p.id}: płyta podporowa ${w.bp}×${w.lp}×${w.tp} mm.` : `Podpora ${p.id}: docisk do podłoża niewystarczający nawet dla płyty 400 mm – zwiększ podłoże/wieniec.`);
         if (!ok) allOk = false;
+        if (J.hasAnchors(w)) {
+          const F2 = (p.kotwyF) || { N: 0, Vx: 0, Vy: 0 };
+          const ctx = { sec, mat, ndp };
+          let a2 = null;
+          for (const tp of [w.tp, 15, 20, 25, 30].map(Number).filter((v, i, A) => v >= U.num(w.tp) && A.indexOf(v) === i)) { a2 = KT.auto(ctx, Object.assign({}, w, { tp }), F2, eta); if (a2.ok) break; }
+          if (a2 && a2.ok) { Object.assign(w, { bp: a2.w.bp, lp: a2.w.lp, tp: a2.w.tp, aw: a2.w.aw }); w.kotwy = a2.w.kotwy; log.push(`Podpora ${p.id}: kotwy ${KT.txt(w)}, płyta ${w.bp}×${w.lp}×${w.tp} mm – wytężenie ${Math.round(a2.o.u * 100)}%.`); }
+          else { allOk = false; log.push(`Podpora ${p.id}: nie dobrano kotew (${KT.TYPY[(w.kotwy || {}).typ] || ''}) – zwiększ wymiary podpory betonowej, zmień rodzaj kotew lub klasę betonu.`); }
+        }
       }
       if (sec.kind === 'I' || sec.kind === 'U' || sec.kind === 'RHS') {
         const isEnd = (p.idx === 0 && U.num(st.geom.wspL) === 0) || (p.idx === r.md.sup.length - 1 && U.num(st.geom.wspP) === 0);
@@ -783,7 +822,7 @@ J.jointTxt = function (w, sec) {
   if (w.typ === 'blacha_zebrowa') return `blacha żebrowa ${u(w.hp)}×${u(w.tp)} mm, śruby ${u(w.nr || w.n)}${u(w.nc, 1) > 1 ? '×' + u(w.nc) : ''} ${w.d} kl. ${w.kl}, spoiny a = ${u(w.a)} mm`;
   if (w.typ === 'katowniki') return `kątowniki 2×L${String(w.L).replace(/x/g, '×')} dł. ${u(w.hp)} mm, śruby ${u(w.nr)} ${w.d} kl. ${w.kl} (środnik) + 2×${u(w.nr)} (podpora)`;
   if (w.typ === 'spawane') return w.spoiny === 'czolowa' ? 'spoina czołowa z pełnym przetopem' : `spoiny pachwinowe ${w.spoiny === 'obwodowe' ? `obwodowe a_w = ${u(w.aw)}, a_f = ${u(w.af)}` : `środnika a = ${u(w.aw)}`} mm`;
-  if (w.typ === 'oparcie') return `płyta podporowa ${u(w.bp)}×${u(w.lp)}×${u(w.tp)} mm`;
+  if (w.typ === 'oparcie') return `płyta podporowa ${u(w.bp)}×${u(w.lp)}×${u(w.tp)} mm${J.hasAnchors(w) ? `, kotwy ${KT.txt(w)}` : ''}`;
   return 'oparcie na stali';
 };
 /* ---------------------------------------------------------- dobór kształtownika */

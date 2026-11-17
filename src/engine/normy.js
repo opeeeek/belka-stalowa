@@ -47,6 +47,7 @@ const always = () => true;
 const has = (rodzaj) => (st) => (st.obciazenia || []).some(o => o.rodzaj === rodzaj && o.aktywne !== false);
 const anyConn = (st) => (st.podpory || []).some(p => p.wezel && ['blacha_czolowa', 'blacha_zebrowa'].includes(p.wezel.typ));
 const anyBearing = (kind) => (st) => (st.podpory || []).some(p => p.wezel && p.wezel.typ === 'oparcie' && p.wezel.podloze === kind);
+const anyAnchors = (st) => (st.podpory || []).some(p => p.wezel && p.wezel.typ === 'oparcie' && p.wezel.podloze === 'beton' && p.wezel.kotwy && p.wezel.kotwy.on !== false);
 const stages = (st) => (st.etapy || []).length > 1 || (st.podpory || []).some(p => p.tymczasowa);
 const fire = (st) => !!(st.pozar && st.pozar.aktywny);
 const fat = (st) => !!(st.zmeczenie && st.zmeczenie.aktywny);
@@ -85,6 +86,8 @@ const DOC1 = [
     zmiany: [], poprawki: ['PN-EN 1993-1-2:2007/AC:2009'], zk: 'Załącznik krajowy NA – w polskiej wersji normy', gdy: fire, zakres: 'właściwości stali w temperaturze, nośność w pożarze (4.2.3), przyrost temperatury (4.2.5)', pewnosc: 'tak' },
   { k: 'EN1992-1-1', oznaczenie: 'PN-EN 1992-1-1:2008', en: 'EN 1992-1-1:2004', tytul: 'Eurokod 2 – Projektowanie konstrukcji z betonu – Reguły ogólne i reguły dla budynków',
     zmiany: ['PN-EN 1992-1-1:2008/A1:2015'], poprawki: ['PN-EN 1992-1-1:2008/AC:2011'], zk: 'Załącznik krajowy NA – w polskiej wersji normy (γc = 1,4; αcc = 1,0)', gdy: anyBearing('beton'), zakres: 'fcd, docisk lokalny (6.7) – oparcie belki na betonie', pewnosc: 'sprawdz' },
+  { k: 'EN1992-4', oznaczenie: 'PN-EN 1992-4:2018', en: 'EN 1992-4:2018', tytul: 'Eurokod 2 – Projektowanie konstrukcji z betonu – Część 4: Projektowanie zamocowań do stosowania w betonie',
+    zmiany: [], poprawki: [], zk: 'Załącznik krajowy – status do potwierdzenia w katalogu PKN (przyjęto wartości zalecane: γc = 1,5; γinst wg ETA)', gdy: anyAnchors, zakres: 'kotwy płyty podporowej: γMs, γMc (4.4), rozciąganie i ścinanie (7.2), interakcja (7.2.3), luz otworów (6.2.2)', pewnosc: 'sprawdz' },
   { k: 'EN1996-1-1', oznaczenie: 'PN-EN 1996-1-1+A1:2013-05', en: 'EN 1996-1-1:2005+A1:2012', tytul: 'Eurokod 6 – Projektowanie konstrukcji murowych – Reguły ogólne',
     zmiany: [], poprawki: [], zk: 'Załącznik krajowy NA – w polskiej wersji normy', gdy: anyBearing('mur'), zakres: 'nośność muru na obciążenie skupione (6.1.3) – oparcie belki na murze', pewnosc: 'sprawdz' },
   { k: 'EN1090-2', oznaczenie: 'PN-EN 1090-2:2018-09', en: 'EN 1090-2:2018', tytul: 'Wykonanie konstrukcji stalowych i aluminiowych – Część 2: Wymagania techniczne dotyczące konstrukcji stalowych',
@@ -127,6 +130,7 @@ const DOC2 = [
   { k: 'EN1993-1-10', en: 'EN 1993-1-10 (2. gen.)', tytul: 'Eurocode 3 – Part 1-10: Material toughness and through-thickness properties', gdy: always },
   { k: 'EN1993-1-2', en: 'EN 1993-1-2:2024', tytul: 'Eurocode 3 – Part 1-2: Structural fire design', gdy: fire },
   { k: 'EN1992-1-1', en: 'EN 1992-1-1:2023', tytul: 'Eurocode 2 – Design of concrete structures – Part 1-1', gdy: anyBearing('beton') },
+  { k: 'EN1992-4', en: 'EN 1992-4 (2. gen.)', tytul: 'Eurocode 2 – Part 4: Design of fastenings for use in concrete', gdy: anyAnchors },
   { k: 'EN1996-1-1', en: 'EN 1996-1-1 (2. gen.)', tytul: 'Eurocode 6 – Design of masonry structures – Part 1-1', gdy: anyBearing('mur') },
   { k: 'EN1090-2', en: 'EN 1090-2:2018', tytul: 'Execution of steel structures – Part 2 (norma wykonawcza – wspólna dla obu generacji)', gdy: always, wykonawcza: true }
 ];
@@ -164,7 +168,8 @@ N.NDP1_PL = {
   dTR:      { v: 0, d: 'ΔTR – element bezpieczeństwa [K]', ref: 'PN-EN 1993-1-10, 2.2(5)', z: 'wartość zalecana', sp: true },
   gc:       { v: 1.40, d: 'γc – beton (sytuacja trwała)', ref: 'PN-EN 1992-1-1, 2.4.2.4', z: 'ZK PL' },
   acc:      { v: 1.00, d: 'αcc', ref: 'PN-EN 1992-1-1, 3.1.6(1)', z: 'ZK PL' },
-  betaJ:    { v: 2 / 3, d: 'βj – współczynnik materiałowy podlewki', ref: 'PN-EN 1993-1-8, 6.2.5(7)', z: 'norma' }
+  betaJ:    { v: 2 / 3, d: 'βj – współczynnik materiałowy podlewki', ref: 'PN-EN 1993-1-8, 6.2.5(7)', z: 'norma' },
+  gcK:      { v: 1.50, d: 'γc – beton w zamocowaniach (γMc = γc·γinst)', ref: 'PN-EN 1992-4, 4.4.2.2, tabl. 4.1 – wartość zalecana', z: 'norma' }
 };
 // Ugięcia graniczne – kryteria uzgadniane z inwestorem (PN-EN 1990, A1.4; PN-EN 1993-1-1, 7.2.1 z ZK).
 N.UGIECIA = {

@@ -97,8 +97,8 @@ function rec() {
   o.add = (grp, n, ref, Ed, Rd, unit, fx, extra) => { const u = Rd > 0 ? Math.abs(Ed) / Rd : (Math.abs(Ed) > 0 ? Infinity : 0); o.checks.push(Object.assign({ grp, n, ref, Ed, Rd, unit: unit || 'F', u, f: fx || '' }, extra || {})); return u; };
   o.ratio = (grp, n, ref, u, fx, extra) => o.checks.push(Object.assign({ grp, n, ref, Ed: u, Rd: 1, unit: '-', u, f: fx || '' }, extra || {}));
   // rozstaw (tabl. 3.3): min – wymaganie normy; max – wymaganie normy; zal – zalecenie (ciągliwość, montaż)
-  o.dmin = (el, n, v, lim, typ) => { if (v === undefined || v === null || !isFinite(v)) return; o.detal.push({ el, n, v, lim, ok: v >= lim - 1e-6, typ: typ || 'min', rel: '≥' }); };
-  o.dmax = (el, n, v, lim, typ) => { if (v === undefined || v === null || !isFinite(v) || !isFinite(lim)) return; o.detal.push({ el, n, v, lim, ok: v <= lim + 1e-6, typ: typ || 'max', rel: '≤' }); };
+  o.dmin = (el, n, v, lim, typ, ref) => { if (v === undefined || v === null || !isFinite(v)) return; o.detal.push({ el, n, v, lim, ok: v >= lim - 1e-6, typ: typ || 'min', rel: '≥', ref }); };
+  o.dmax = (el, n, v, lim, typ, ref) => { if (v === undefined || v === null || !isFinite(v) || !isFinite(lim)) return; o.detal.push({ el, n, v, lim, ok: v <= lim + 1e-6, typ: typ || 'max', rel: '≤', ref }); };
   return o;
 }
 // komplet warunków rozstawu dla blachy / kątownika / środnika (tabl. 3.3)
@@ -547,6 +547,8 @@ function fin(o) {
   return o;
 }
 
+W.rec = rec; W.fin = fin;      // rejestr sprawdzeń – wspólny z modułem kotew (BS.KT)
+
 /* ---------------------------------------------------------- wejście ogólne */
 W.design = function (ctx, w, F) {
   const t = w.typ;
@@ -621,7 +623,7 @@ W.defaults = function (typ, sec) {
   if (typ === 'blacha_zebrowa') return Object.assign(com, { hp, tp: 10, nr, n: nr, nc: 1, e1: 40, p1, e2: 50, p2: 60, z: 60, e2b: 50, a: 6 });
   if (typ === 'katowniki') return Object.assign(com, { L: '90x9', Lser: 'L', dlugiNaPodp: false, hp, nr, e1: 40, p1, gb: 50, gs: 50, gap: 10, sup: 'pas_slupa' });
   if (typ === 'spawane') return Object.assign(com, { spoiny: 'srodnik', aw: Math.max(3, Math.ceil(0.55 * tw)), af: 6 });
-  if (typ === 'oparcie') return { podloze: 'beton', bp: 200, lp: 150, tp: 15, beton: 'C25/30', alfa: 1.5, lb: 150, fd: 2.0, beta: 1.2, zebro: false, bs: 70, ts: 10, ch: '' };
+  if (typ === 'oparcie') { const kt = BS.KT ? BS.KT.defaults(sec) : null; return Object.assign({ podloze: 'beton', bp: kt ? BS.KT.bpMin(kt.sB, 20) : 200, lp: 150, tp: 15, beton: 'C25/30', alfa: '', lb: 150, fd: 2.0, beta: 1.2, zebro: false, bs: 70, ts: 10, ch: '' }, BS.KT ? BS.KT.supDefaults() : {}, kt ? { kotwy: kt } : {}); }
   return { zebro: false, bs: 70, ts: 10, ch: '' };
 };
 W.spliceDefaults = function (sec, x) {

@@ -81,7 +81,12 @@ RP.takeoff = function (S, R) {
     if (o && w.typ === 'blacha_czolowa') rows.push({ poz: poz++, n: `Blacha czołowa – podpora ${p.id}`, mat: o.pl.gat, szt: 1, wym: `${f(U.num(w.tp), 0)}×${f(U.num(w.bp), 0)}×${f(U.num(w.hp), 0)}`, m: o.mass });
     else if (o && w.typ === 'blacha_zebrowa') rows.push({ poz: poz++, n: `Blacha żebrowa – podpora ${p.id}`, mat: o.pl.gat, szt: 1, wym: `${f(U.num(w.tp), 0)}×${f(o.geom.z + (o.geom.nc - 1) * o.geom.p2 + o.geom.e2, 0)}×${f(U.num(w.hp), 0)}`, m: o.mass });
     else if (o && w.typ === 'katowniki') rows.push({ poz: poz++, n: `Kątowniki – podpora ${p.id}`, mat: o.pl.gat, szt: 2, wym: `L${String(w.L).replace(/x/g, '×')}, l = ${f(U.num(w.hp), 0)}`, m: o.mass });
-    else if (w.typ === 'oparcie' && w.podloze !== 'stal') rows.push({ poz: poz++, n: `Płyta podporowa – podpora ${p.id}`, mat: S.material.gatunek, szt: 1, wym: `${f(U.num(w.tp), 0)}×${f(U.num(w.bp), 0)}×${f(U.num(w.lp), 0)}`, m: rho * U.num(w.tp) * U.num(w.bp) * U.num(w.lp) });
+    else if (w.typ === 'oparcie' && w.podloze !== 'stal') rows.push({ poz: poz++, n: `Płyta podporowa – podpora ${p.id}`, mat: S.material.gatunek, szt: 1, wym: `${f(U.num(w.tp), 0)}×${f(U.num(w.bp), 0)}×${f(U.num(w.lp), 0)}${rp.kotwy ? `, otwory ${rp.kotwy.geom.n}×Ø${f(rp.kotwy.geom.df, 0)}` : ''}`, m: rho * U.num(w.tp) * U.num(w.bp) * U.num(w.lp) });
+    if (rp.kotwy) {
+      const ko = rp.kotwy, g = ko.geom, k = g.k, L = ko.len, dh = ko.T && ko.T.dh;
+      rows.push({ poz: poz++, n: `Kotwy – podpora ${p.id} (${BS.KT.KROTKO[k.typ] || k.typ})`, mat: `kl. ${k.kl}`, szt: g.n, wym: `${k.d}, L = ${f(L.Lr, 0)} mm, h_ef = ${f(ko.hef, 0)} mm + nakrętka i podkładka${k.typ === 'wbetonowane' ? `, płytka kotwiąca ${f(dh, 0)}×${f(dh, 0)}×${f(L.tAP, 0)}` : ''}${k.typ === 'wklejane' ? `, zaprawa żywiczna (ETA), otwór Ø${f(L.dDrill, 0)}×${f(L.h0, 0)}` : ''}${k.otw === 'podkladki' ? ', podkładki spawane' : ''}`, m: g.n * rho * (Math.PI * g.d * g.d / 4 * L.Lr + (k.typ === 'wbetonowane' ? dh * dh * L.tAP : 0)) });
+      if (U.num(w.aw, 0) > 0) weld += 2 * Math.min(U.num(w.lb, U.num(w.lp)) || U.num(w.lp), U.num(w.lp));
+    }
     if (o) { addB(o); weld += o.weldL || 0; }
     if (w.zebro && (sec.kind === 'I' || sec.kind === 'U')) { const hs = sec.hw || (sec.h - sec.tg - sec.td), c = BS.J.snipeSup(S, sec, w).c, nP = sec.kind === 'U' ? 1 : 2; rows.push({ poz: poz++, n: `Żebra podporowe – podpora ${p.id}`, mat: S.material.gatunek, szt: nP, wym: `${f(U.num(w.ts), 0)}×${f(U.num(w.bs), 0)}×${f(hs, 0)}${c > 0 ? `, wcięcia 45° ${f(c, 0)}×${f(c, 0)}` : ''}`, m: nP * rho * U.num(w.ts) * (U.num(w.bs) * hs - c * c) }); weld += 2 * nP * Math.max(0, hs - 2 * c); }
   });
@@ -201,6 +206,7 @@ RP.build = function (S, R, opt) {
     if (p.patch) h += mk(`${p.id}-PL`, patchTxt(p.patch, `Docisk środnika nad podporą ${p.id}`));
     if (p.zebro) { const z = p.zebro; h += mk(`${p.id}-ZB`, line(`Żebra podporowe ${f(z.bs, 0)} × ${f(z.ts, 0)} mm + pasmo środnika 15εt<sub>w</sub>: A<sub>s</sub> = ${f(z.As / 100)} cm², I<sub>s</sub> = ${f(z.Is / 1e4, 1)} cm⁴, i = ${f(z.i, 1)} mm, l = ${f(z.Lcr, 0)} mm, λ̄ = ${f(z.lam, 3)}, krzywa c: χ = ${f(z.chi, 3)}; N<sub>b,Rd</sub> = ${kN(z.NbRd)} kN ≥ R<sub>Ed</sub> = ${kN(z.F)} kN${okS(z.uB)}`, 'PN-EN 1993-1-5 9.4')) + mk(`${p.id}-ZD`, line(`Docisk końców żeber: A<sub>c</sub> = ${z.nS || 2}·(b<sub>s</sub> − c)·t<sub>s</sub> = ${z.nS || 2}·(${f(z.bs, 0)} − ${f(z.c || 0, 0)})·${f(z.ts, 0)} = ${f(z.Acont, 0)} mm² (c – wcięcie narożne 45° przy pasie), F<sub>Rd</sub> = A<sub>c</sub>·f<sub>y</sub>/γ<sub>M0</sub> = ${kN(z.Fbear)} kN${okS(z.uC)}`, '6.2.4')); }
     if (p.plyta) p.plyta.checks.forEach((c, k) => { h += mk(`${p.id}-B${k}`, line(`${esc(c.n)}: ${esc(c.f || '')}; F<sub>Rd</sub> = ${kN(c.Rd)} kN ≥ R<sub>Ed</sub> = ${kN(c.Ed)} kN${okS(c.u)}`, c.ref)); });
+    if (p.kotwy) h += `<div class="kotsec"><p><b>Kotwy płyty podporowej i blacha podstawy – podpora ${esc(p.id)}</b></p>${anchorBody(S, R, p.kotwy, p.kotwyF || {}, (S.podpory[R.md.sup.findIndex(z => z.id === p.id)] || {}).wezel || p.wezel || {}, `${p.id}-K`)}</div>`;
     if (p.pol) h += jointBody(S, R, p.pol, p.F, p.wezel, p.id);
   });
   // ---------------------------------------------------------- styki
@@ -314,7 +320,7 @@ function checksBody(o, idp) {
   });
   if (o.detal && o.detal.length) {
     h += '<p><b>Wymagania konstrukcyjne i zalecenia</b></p>';
-    h += o.detal.map(d => line(`${esc(d.el)}: ${esc(d.n)} – ${f(d.v, 1)} ${d.rel} ${f(d.lim, 1)} mm ${d.ok ? '<span class="ok">✔</span>' : d.typ === 'zal' ? '<span class="warn">! zalecenie niespełnione</span>' : '<span class="fail">✖ NIE</span>'}`, d.typ === 'zal' ? 'SCI P358' : 'PN-EN 1993-1-8 tabl. 3.3')).join('');
+    h += o.detal.map(d => line(`${esc(d.el)}: ${esc(d.n)} – ${f(d.v, 1)} ${d.rel} ${f(d.lim, 1)} mm ${d.ok ? '<span class="ok">✔</span>' : d.typ === 'zal' ? '<span class="warn">! zalecenie niespełnione</span>' : '<span class="fail">✖ NIE</span>'}`, d.ref ? d.ref : d.typ === 'zal' ? 'SCI P358' : 'PN-EN 1993-1-8 tabl. 3.3')).join('');
   }
   (o.uwagi || []).forEach(t => { h += `<p class="note">${esc(t)}</p>`; });
   return h;
@@ -325,6 +331,19 @@ function jointBody(S, R, o, F, w, idp) {
   h += line(`Połączenie: <b>${esc(BS.J.jointTxt(w || {}, R.sec))}</b>; siły: V<sub>Ed</sub> = ${kN(F.V)} kN${F.M ? `, M<sub>Ed</sub> = ${kNm(F.M)} kNm` : ''}${F.Nt ? `, N<sub>t</sub> = ${kN(F.Nt)} kN (wiązanie – sytuacja wyjątkowa)` : ''}${F.recz ? ' (zadane ręcznie)' : ''}`);
   if (B) h += line(`Śruby ${esc(BS.W.boltTxt(B))}: f<sub>ub</sub> = ${B.fub} MPa, A<sub>s</sub> = ${f(B.As, 0)} mm²; F<sub>v,Rd</sub> = ${kN(B.Fv)} kN, F<sub>t,Rd</sub> = ${kN(B.Ft)} kN${B.pre ? `, F<sub>p,C</sub> = ${kN(B.FpC)} kN, μ = ${f(B.mu, 2)}, kategoria ${B.kat}` : ''}`, 'PN-EN 1993-1-8 tabl. 3.1, 3.4');
   if (o.pl) h += line(`Blachy / kątowniki: ${esc(o.pl.gat)} – f<sub>y</sub> = ${o.pl.fy} MPa, f<sub>u</sub> = ${o.pl.fu} MPa, β<sub>w</sub> = ${f(o.pl.bw, 2)}`, 'PN-EN 1993-1-1 tabl. 3.1; 1-8 tabl. 4.1');
+  return h + checksBody(o, idp);
+}
+// kotwy płyty podporowej (PN-EN 1992-4) i blacha podstawy – dane, siły, długość, sprawdzenia
+function anchorBody(S, R, o, F, w, idp) {
+  const g = o.geom, k = g.k, v = D.anchorViews(R.sec, w, o, { W: 440 }), tg = Math.max(0, U.num(k.tg, 0));
+  const OTW = { normalne: 'otwory normalne', podkladki: 'otwory powiększone z podkładkami przyspawanymi', powiekszone: 'otwory powiększone bez podkładek', owalne: 'otwory owalne wzdłuż belki' };
+  const cc = (c) => (c >= 5e4 ? '∞' : f(c, 0));
+  let h = `<div class="fig">${v.plan}${v.sect}</div>`;
+  h += line(`Kotwy: <b>${esc(BS.KT.txt(w))}</b> – ${esc(BS.KT.TYPY[k.typ] || k.typ)}; stal f<sub>yk</sub> = ${o.kl.fyk} MPa, f<sub>uk</sub> = ${o.kl.fuk} MPa, A<sub>s</sub> = ${f(g.As, 1)} mm²; γ<sub>Ms,N</sub> = ${f(o.gMsN, 2)}, γ<sub>Ms,V</sub> = ${f(o.gMsV, 2)}; beton ${esc(w.beton || '')} (f<sub>ck</sub> = ${f(o.fck, 0)} MPa) ${o.cr ? 'zarysowany' : 'niezarysowany'}; γ<sub>Mc</sub> = γ<sub>c</sub>·γ<sub>inst</sub> = ${f(o.gMc / o.ginst, 2)}·${f(o.ginst, 2)} = ${f(o.gMc, 2)}`, 'PN-EN 1992-4 4.4, 7');
+  h += line(`Geometria: n = ${g.n} (${g.nL} ${g.nL > 1 ? 'rzędy' : 'rząd'} × 2 kotwy po obu stronach pasa), s<sub>B</sub> = ${f(g.sB, 0)} mm${g.nL > 1 ? `, s<sub>L</sub> = ${f(g.sL, 0)} mm` : ''}, h<sub>ef</sub> = ${f(o.hef, 0)} mm; ${OTW[k.otw] || ''} d<sub>f</sub> = ${f(g.df, 0)} mm; podlewka t<sub>g</sub> = ${f(tg, 0)} mm; płyta ${f(g.bp, 0)}×${f(g.lp, 0)}×${f(g.tp, 0)} mm (e<sub>1</sub> = ${f(g.e1, 0)}, e<sub>2</sub> = ${f(g.e2, 0)} mm); podpora betonowa b<sub>c</sub> = ${g.bc > 0 ? f(g.bc, 0) : '—'}, l<sub>c</sub> = ${g.lc > 0 ? f(g.lc, 0) : '∞ (ściana)'}, h<sub>c</sub> = ${cc(g.hc)} mm; odległości kotew od krawędzi: c<sub>x</sub> = ${cc(g.cxZ)} / ${cc(g.cxP)} mm (czoło / przęsło), c<sub>y</sub> = ${cc(g.cy)} mm`);
+  h += line(`Siły na grupę kotew: N<sub>Ed</sub> = ${kN(o.Nd)} kN (odrywanie), V<sub>x,Ed</sub> = ${kN(o.Vx)} kN, V<sub>y,Ed</sub> = ${kN(o.Vy)} kN – ${esc(F.opis || '')}`, 'PN-EN 1990 6.4.3; tabl. A1.2');
+  h += line(`Długość kotwy: ${esc(o.len.opis)} = ${f(o.len.L, 0)} mm → <b>L = ${f(o.len.Lr, 0)} mm</b>${o.len.h0 ? `; otwór wiercony Ø${f(o.len.dDrill, 0)} mm, głęb. ${f(o.len.h0, 0)} mm` : ''}`);
+  if (!o.checks.length) h += line('Brak siły odrywającej i poziomej – kotwy konstrukcyjne (ustalenie położenia płyty); sprawdzono wymagania konstrukcyjne.');
   return h + checksBody(o, idp);
 }
 function spliceBody(S, R, o, F, s, idp) {
@@ -341,6 +360,7 @@ RP.jointBlock = function (S, R, sel) {
   const p = R.md.sup[sel.sup], rp = (R.podpory || []).find(q => q.id === (p && p.id));
   if (!rp) return '<p class="hint">Brak wyników.</p>';
   if (rp.pol) return jointBody(S, R, rp.pol, rp.F, S.podpory[sel.sup].wezel, rp.id);
+  if (rp.kotwy) return rp.checks.filter(c => !/-K-|-K0$/.test(c.id)).map(c => line(`${esc(c.n)}${c.f ? `: ${esc(c.f)}` : ''} → ${V0(c.Ed, c.unit)} ≤ ${V0(c.Rd, c.unit)}${okS(c.util)}`, c.ref)).join('') + anchorBody(S, R, rp.kotwy, rp.kotwyF || {}, S.podpory[sel.sup].wezel, `${rp.id}-K`);
   return rp.checks.map(c => line(`${esc(c.n)}${c.f ? `: ${esc(c.f)}` : ''} → ${V0(c.Ed, c.unit)} ≤ ${V0(c.Rd, c.unit)}${okS(c.util)}`, c.ref)).join('') || '<p class="hint">Brak sprawdzeń.</p>';
 };
 /* raport „Statyka”: dane, schemat, obciążenia, wykresy, reakcje */

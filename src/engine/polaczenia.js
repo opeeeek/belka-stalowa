@@ -142,9 +142,18 @@ C.bearingPlate = function (sec, mat, ndp, w, REd) {
   if (w.podloze === 'beton') {
     const fck = M.BETON[w.beton] || 25;
     const fcd = ndp.acc * fck / ndp.gc;
-    const al = U.clamp(U.num(w.alfa, 1), 1, 3);
+    const autoA = (w.alfa === '' || w.alfa === null || w.alfa === undefined) && w.bc > 0;
+    let al, aTxt = '';
+    if (autoA) {
+      // pole rozdziału A_c1 – współśrodkowe i podobne do A_c0 = b_p·l_p, w obrysie elementu, wysokość ≥ (b₂ − b₁) (PN-EN 1992-1-1 6.7(2), rys. 6.29)
+      const hc = w.hc > 0 ? w.hc : Infinity, ex = Math.max(0, Math.min(w.bc / 2 - (w.ec || 0), w.bc / 2 + (w.ec || 0)) - w.lp / 2), ey = w.lc > 0 ? Math.max(0, (w.lc - w.bp) / 2) : Infinity;
+      const kx = Math.min((w.lp + 2 * ex) / w.lp, (w.lp + hc) / w.lp), ky = Math.min((w.bp + 2 * ey) / w.bp, (w.bp + hc) / w.bp);
+      al = U.clamp(Math.min(3, kx, ky), 1, 3);
+      aTxt = `; α = √(A_c1/A_c0) = ${U.fmt(al, 2)} z wymiarów podpory (A_c1 współśrodkowe, podobne do płyty, w obrysie elementu, ≤ 3)`;
+    } else al = U.clamp(U.num(w.alfa, 1), 1, 3);
     fjd = ndp.betaJ * al * fcd;
-    desc = `fjd = βj·α·fcd = ${U.fmt(ndp.betaJ, 3)}·${U.fmt(al, 2)}·${U.fmt(fcd, 2)} = ${U.fmt(fjd, 2)} MPa (${w.beton}, fcd = αcc·fck/γc)`;
+    desc = `fjd = βj·α·fcd = ${U.fmt(ndp.betaJ, 3)}·${U.fmt(al, 2)}·${U.fmt(fcd, 2)} = ${U.fmt(fjd, 2)} MPa (${w.beton}, fcd = αcc·fck/γc)${aTxt}`;
+    out.alfa = al; out.alfaAuto = autoA;
   } else {
     const fd = U.num(w.fd, 1.5), be = U.clamp(U.num(w.beta, 1), 1, 1.5);
     fjd = be * fd;
@@ -160,6 +169,8 @@ C.bearingPlate = function (sec, mat, ndp, w, REd) {
     f: `${desc}; c = tp·√(fy/(3·fjd·γM0)) = ${U.fmt(c, 1)} mm; Aeff = ${U.fmt(beff, 0)}×${U.fmt(leff, 0)} mm` });
   if (w.podloze === 'mur' && lb < 100) out.uwagi.push('Długość oparcia na murze < 100 mm – sprawdź wymagania konstrukcyjne dla oparcia belek na murze.');
   if (w.podloze === 'beton' && lb < 80) out.uwagi.push('Długość oparcia na betonie < 80 mm – zalecane zwiększenie.');
+  if (w.podloze === 'beton' && (w.alfa === '' || w.alfa === null || w.alfa === undefined) && !(w.bc > 0)) out.uwagi.push('Nie podano wymiarów podpory betonowej – przyjęto α = 1 (bez zwiększenia docisku).');
+  if (w.bc > 0 && w.lp > w.bc - 2 * Math.abs(w.ec || 0) + 1e-6) out.uwagi.push(`Płyta podporowa (l_p = ${U.fmt(w.lp, 0)} mm) wystaje poza podporę betonową b_c = ${U.fmt(w.bc, 0)} mm.`);
   out.u = Math.max(...out.checks.map(q => q.u), 0);
   return out;
 };

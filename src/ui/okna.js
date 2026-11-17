@@ -163,6 +163,46 @@ const JDEF = (v, h) => ({
 }[v] || {});
 A.JDEF = JDEF;
 const BOLTS = () => Object.keys(M.SRUBY).map(k => [k, k]), BKL = () => Object.keys(M.SRUBY_KL).map(k => [k, 'kl. ' + k]);
+/* ---------------------------------------------------------- płyta na betonie: podpora, kotwy (PN-EN 1992-4), siły dodatkowe */
+function anchorFields(i, w, q, sec, sub) {
+  const KT = BS.KT, r = R(), id = r && r.md && r.md.sup[i] ? r.md.sup[i].id : null, rp = r && (r.podpory || []).find(z => z.id === id), pl = rp && rp.plyta;
+  let h = fNum(q + '.alfa', 'α = √(A_{c1}/A_{c0}) ≤ 3 (puste – z wymiarów podpory)', '', [1, 1.5, 2, 2.5, 3], { min: 1, max: 3, opt: true, ph: pl && pl.alfa ? fmt(pl.alfa, 2) : '1' });
+  h += sub('support', 'Podpora betonowa') + fNum(q + '.bc', 'Szerokość podpory w kierunku belki b_{c}', 'mm', [200, 250, 300, 365, 400, 500, 600], { min: 0, opt: true, ph: 'brak' }) + fNum(q + '.lc', 'Długość podpory w poprzek l_{c} (0 – ściana)', 'mm', [0, 300, 400, 500, 600, 800], { min: 0 }) + fNum(q + '.hc', 'Wysokość (grubość) elementu h_{c}', 'mm', [200, 250, 300, 400, 500, 1000], { min: 0 }) + fNum(q + '.ec', 'Przesunięcie płyty od osi podpory e_{c} (+ ku przęsłu)', 'mm', [-50, -25, 0, 25, 50], {});
+  h += fNum(q + '.aw', 'Spoiny pasa z blachą a_{w}', 'mm', [0, 3, 4, 5, 6, 8], { min: 0 });
+  h += sub('anchors', 'Kotwy (PN-EN 1992-4)');
+  if (!w.kotwy) return h + `<label class="chk"><input type="checkbox" data-kton="${i}"><span>Kotwienie płyty w betonie</span></label>`;
+  h += fChk(q + '.kotwy.on', 'Kotwienie płyty w betonie', { re: true });
+  if (w.kotwy.on === false) return h;
+  const k = w.kotwy, d = M.SRUBY[k.d] ? M.SRUBY[k.d].d : 20, bf = sec ? (sec.bd || sec.b || 100) : 100, sBm = KT.sBmin(bf, d, U.num(w.aw, 0));
+  h += fSel(q + '.kotwy.typ', 'Rodzaj kotew', Object.keys(KT.TYPY).map(t => [t, KT.TYPY[t]]), { wide: true });
+  h += fSel(q + '.kotwy.d', 'Średnica kotwy', KT.SIZES.map(s => [s, s])) + fSel(q + '.kotwy.kl', 'Klasa stali kotwy', Object.keys(KT.KL).map(c => [c, `${c} (f_uk = ${KT.KL[c].fuk} MPa)`]));
+  h += fSel(q + '.kotwy.nL', 'Rzędy kotew wzdłuż belki n_{L}', [[1, '1 rząd – 2 kotwy'], [2, '2 rzędy – 4 kotwy'], [3, '3 rzędy – 6 kotew']], { num: true });
+  h += fNum(q + '.kotwy.sB', 'Rozstaw w poprzek belki s_{B}', 'mm', [140, 160, 180, 200, 220, 250, 300], { min: 20 });
+  if (U.num(k.nL, 1) > 1) h += fNum(q + '.kotwy.sL', 'Rozstaw wzdłuż belki s_{L}', 'mm', [80, 100, 120, 150, 200], { min: 20 });
+  h += fNum(q + '.kotwy.hef', 'Głębokość zakotwienia h_{ef}', 'mm', k.typ === 'wbetonowane' ? [150, 200, 250, 300, 400, 500] : k.typ === 'rozporowe' ? [40, 50, 60, 70, 80, 100, 125] : [80, 100, 125, 160, 200, 250, 300], { min: 30 });
+  if (k.typ === 'wklejane') h += fNum(q + '.kotwy.tauCr', 'τ_{Rk} – beton zarysowany (ETA)', 'MPa', [3, 4, 5, 6, 7, 8], { min: 0.5 }) + fNum(q + '.kotwy.tauUcr', 'τ_{Rk} – beton niezarysowany (ETA)', 'MPa', [6, 8, 9, 10, 12, 14], { min: 0.5 });
+  else if (k.typ === 'rozporowe') h += fNum(q + '.kotwy.NRkp', 'N_{Rk,p} – wyrwanie (ETA)', 'kN', [10, 15, 20, 25, 30, 40, 50], { min: 0, opt: true, ph: 'z ETA' });
+  else h += fNum(q + '.kotwy.dh', 'Średnica płytki kotwiącej / łba d_{h}', 'mm', [40, 50, 60, 70, 80, 100], { min: 0, opt: true, ph: String(Math.ceil(3 * d / 5) * 5) });
+  h += fNum(q + '.kotwy.ginst', 'γ_{inst} – montaż (ETA)', '', [1, 1.2, 1.4], { min: 1, opt: true, ph: k.typ === 'wbetonowane' ? '1,0' : '1,2' });
+  h += fSel(q + '.kotwy.otw', 'Otwory w blasze', [['normalne', 'normalne (d_f wg tabl. 6.1)'], ['podkladki', 'powiększone + podkładki przyspawane'], ['powiekszone', 'powiększone, bez podkładek'], ['owalne', 'owalne wzdłuż belki (przesuw)']], { wide: true });
+  h += fNum(q + '.kotwy.tg', 'Podlewka (zaprawa) t_{g}', 'mm', [0, 5, 10, 20, 30, 40, 50], { min: 0 });
+  h += fChk(q + '.kotwy.rysy', 'Beton zarysowany (bezpiecznie)') + fChk(q + '.kotwy.zbrKr', 'Zbrojenie krawędziowe i strzemiona ≤ 100 mm (ψ_{re,V} = 1,4)') + fChk(q + '.kotwy.zbrGes', 'Gęste zbrojenie przy kotwach (rozstaw < 150 mm) – ψ_{re,N}') + fChk(q + '.kotwy.utw', 'Płyta utwierdzona na kotwach (α_{M} = 2)');
+  const ko = rp && rp.kotwy, F2 = rp && rp.kotwyF;
+  h += `<p class="hint" style="margin:4px 0">Kotwy po obu stronach pasa: s<sub>B</sub> ≥ ${sBm} mm (pas ${fmt(bf, 0)} mm + podkładka + spoina), płyta b<sub>p</sub> ≥ ${KT.bpMin(Math.max(U.num(k.sB, 0), sBm), d)} mm.${ko ? ` Długość kotwy L = ${fmt(ko.len.Lr, 0)} mm${ko.len.h0 ? `, otwór Ø${fmt(ko.len.dDrill, 0)} × ${fmt(ko.len.h0, 0)} mm` : ''}.` : ''}</p>`;
+  h += sub('anchorF', 'Siły na zakotwienie') + `<p class="hint" style="margin:2px 0 6px">${F2 ? esc(F2.opis) : '—'}. Siła osiowa belki obciąża kotwy tylko na podporze nieprzesuwnej.</p>` + fNum(q + '.Nt', 'Dodatkowa siła odrywająca N_{t}', 'kN', [0, 5, 10, 20, 50], { min: 0 }) + fNum(q + '.Hx', 'Dodatkowa siła pozioma wzdłuż belki H_{x}', 'kN', [0, 5, 10, 20, 50], { min: 0 }) + fNum(q + '.Hy', 'Dodatkowa siła pozioma w poprzek H_{y}', 'kN', [0, 5, 10, 20, 50], { min: 0 });
+  h += `<div class="row wide"><span></span><button class="btn sm" data-ktauto="${i}" type="button" title="Najmniejszy wariant kotew (średnica, liczba, h_ef) i szerokość płyty spełniające warunki – rodzaj kotew i klasa jak wybrane">⚙ Dobierz kotwy</button></div>`;
+  return h;
+}
+A.bindAnchorFields = function (m, redraw) {
+  $$('[data-kton]', m).forEach(cb => cb.addEventListener('change', () => { const st = S(), w = st.podpory[+cb.dataset.kton].wezel, sec = R() && R().sec; if (!w) return; const sd = BS.KT.supDefaults(); Object.keys(sd).forEach(k2 => { if (w[k2] === undefined) w[k2] = sd[k2]; }); w.kotwy = BS.KT.defaults(sec); w.bp = Math.max(U.num(w.bp, 0), BS.KT.bpMin(w.kotwy.sB, 20)); A.changed(true); A.recalcNow(); redraw(); }));
+  $$('[data-ktauto]', m).forEach(b => b.addEventListener('click', () => {
+    const i = +b.dataset.ktauto, r = R(), st = S(), w = st.podpory[i].wezel, p = r.md.sup[i], rp = (r.podpory || []).find(z => z.id === p.id) || {};
+    let a = null; for (const tp of [U.num(w.tp, 15), 15, 20, 25, 30].filter((v, j, X) => v >= U.num(w.tp, 15) && X.indexOf(v) === j)) { a = BS.KT.auto({ sec: r.sec, mat: r.mat, ndp: r.ndp }, Object.assign({}, w, { tp }), rp.kotwyF || { N: 0, Vx: 0, Vy: 0 }, 1); if (a.ok) break; }
+    if (!a || !a.ok) { Q.toast('Nie znaleziono wariantu kotew spełniającego warunki – zwiększ podporę betonową, zmień rodzaj kotew lub klasę betonu.'); return; }
+    Object.assign(w, { bp: a.w.bp, lp: a.w.lp, tp: a.w.tp }); w.kotwy = a.w.kotwy; A.changed(true); A.recalcNow(); redraw();
+    Q.toast(`Kotwy: ${BS.KT.txt(w)}; płyta ${w.bp}×${w.lp}×${w.tp} mm – wytężenie ${Math.round(a.o.u * 100)}%.`);
+  }));
+};
 function jointFields(i, designer) {
   const st = S(), p = st.podpory[i], w = p.wezel || (p.wezel = { typ: 'brak' }), q = `podpory.${i}.wezel`, sec = R() && R().sec;
   const sub = (k, l) => `<div class="lsub" data-jz="${k}" data-js="${k}">${l}</div>`;
@@ -171,7 +211,7 @@ function jointFields(i, designer) {
     h += fSel(q + '.podloze', 'Podłoże', [['beton', 'beton (PN-EN 1992-1-1, 6.7)'], ['mur', 'mur (PN-EN 1996-1-1, 6.1.3)'], ['stal', 'element stalowy']], { wide: true });
     if (w.podloze !== 'stal') {
       h += sub('plate', 'Płyta podporowa') + fNum(q + '.bp', 'Szerokość płyty b_{p}', 'mm', [120, 150, 180, 200, 220, 250, 300], { min: 20 }) + fNum(q + '.lp', 'Długość oparcia l_{p}', 'mm', [80, 100, 120, 150, 180, 200, 250], { min: 20 }) + fNum(q + '.tp', 'Grubość płyty t_{p}', 'mm', [8, 10, 12, 15, 20, 25, 30], { min: 4 });
-      if (w.podloze === 'beton') h += fSel(q + '.beton', 'Klasa betonu', Object.keys(M.BETON).map(k => [k, k])) + fNum(q + '.alfa', 'α = √(A_{c1}/A_{c0}) ≤ 3', '', [1, 1.5, 2, 2.5, 3], { min: 1, max: 3 });
+      if (w.podloze === 'beton') h += fSel(q + '.beton', 'Klasa betonu', Object.keys(M.BETON).map(k => [k, k])) + anchorFields(i, w, q, sec, sub);
       else h += fNum(q + '.fd', 'Wytrzymałość muru f_{d}', 'MPa', [1, 1.5, 2, 2.5, 3, 4], { min: 0.1 }) + fNum(q + '.beta', 'β – docisk skupiony (1,0–1,5)', '', [1, 1.2, 1.5], { min: 1, max: 1.5 });
     }
   }
@@ -193,11 +233,11 @@ A.supportPopup = function (i, focus) {
   const live = () => {
     const r = R(); if (!r || !r.md) return;
     const p = r.md.sup[i], rp = (r.podpory || []).find(q => q.id === (p && p.id)), sk = $('#spSk', m), ck = $('#spCk', m), rr = $('#spR', m);
-    if (sk && r.sec) { const w0 = S().podpory[i].wezel || {}; sk.innerHTML = (rp && rp.pol ? D.jointViews(r.sec, w0, rp.pol, { W: 350, H: 280 }).elev : D.joint(r.sec, w0, { W: 330, H: 250 })) + (w0.zebro && ['oparcie', 'brak'].includes(w0.typ || 'brak') && (r.sec.kind === 'I' || r.sec.kind === 'U') ? `<div class="stfdet" title="Żebra podporowe – wcięcia narożne 45°">${D.stiffDetail(r.sec, { bs: U.num(w0.bs, 70), ts: U.num(w0.ts, 10), c: J.snipeSup(S(), r.sec, w0).c, a: r.sec.aw, stack: true })}</div>` : ''); Q.themeSvgIn(sk); bindSketch(); }
+    if (sk && r.sec) { const w0 = S().podpory[i].wezel || {}; sk.innerHTML = (rp && rp.pol ? D.jointViews(r.sec, w0, rp.pol, { W: 350, H: 280 }).elev : D.joint(r.sec, w0, { W: 330, H: 250 })) + (w0.zebro && ['oparcie', 'brak'].includes(w0.typ || 'brak') && (r.sec.kind === 'I' || r.sec.kind === 'U') ? `<div class="stfdet" title="Żebra podporowe – wcięcia narożne 45°">${D.stiffDetail(r.sec, { bs: U.num(w0.bs, 70), ts: U.num(w0.ts, 10), c: J.snipeSup(S(), r.sec, w0).c, a: r.sec.aw, stack: true })}</div>` : '') + (rp && rp.kotwy ? (() => { const v = D.anchorViews(r.sec, w0, rp.kotwy, { W: 360 }); return `<div class="stfdet anchv" title="Kotwy – kliknij, aby przejść do danych kotew">${v.plan}${v.sect}</div>`; })() : ''); Q.themeSvgIn(sk); bindSketch(); }
     if (ck) { ck.innerHTML = rp ? checksHTML(rp.checks) : '<p class="hint">Brak wyników (błąd danych).</p>'; bindNref(ck); }
     if (rr && rp) rr.innerHTML = `R<sub>Ed,max</sub> = <b>${fmt(rp.Rmax / 1e3, 1)} kN</b>${rp.Mmax > 1e3 ? ` · |M<sub>Ed</sub>| = ${fmt(rp.Mmax / 1e6, 1)} kNm` : ''} · reakcje charakterystyczne: ${rp.Rk.map(q => `${esc(q.id)} ${fmt(q.R / 1e3, 1)} kN`).join(', ')}`;
   };
-  const bindSketch = () => { const sk = $('#spSk', m); if (!sk) return; if (['blacha_czolowa', 'blacha_zebrowa', 'katowniki', 'spawane'].includes((S().podpory[i].wezel || {}).typ)) { sk.style.cursor = 'pointer'; sk.title = 'Kliknij – okno projektowania połączenia'; sk.onclick = () => A.jointDesigner({ sup: i }); return; } sk.style.cursor = 'pointer'; sk.title = 'Kliknij blachę, śruby lub żebro – przejście do wymiarów'; sk.onclick = (ev) => { const sd = ev.target.closest && ev.target.closest('.stfdet'); if (sd) { const t = $('[data-jz="stiff"]', m); if (t) t.scrollIntoView({ block: 'center' }); return; } const r2 = (sk.querySelector('svg') || sk).getBoundingClientRect(), x = ev.clientX - r2.left, y = ev.clientY - r2.top; const z = x < r2.width * 0.42 ? (y > r2.height * 0.75 ? 'sup' : 'plate') : 'bolts'; const t = $(`[data-jz="${z}"]`, m) || $('[data-jz]', m); if (t) { t.scrollIntoView({ block: 'center' }); Q.hlg(t.nextElementSibling || t); } }; };
+  const bindSketch = () => { const sk = $('#spSk', m); if (!sk) return; if (['blacha_czolowa', 'blacha_zebrowa', 'katowniki', 'spawane'].includes((S().podpory[i].wezel || {}).typ)) { sk.style.cursor = 'pointer'; sk.title = 'Kliknij – okno projektowania połączenia'; sk.onclick = () => A.jointDesigner({ sup: i }); return; } sk.style.cursor = 'pointer'; sk.title = 'Kliknij blachę, śruby lub żebro – przejście do wymiarów'; sk.onclick = (ev) => { const sd = ev.target.closest && ev.target.closest('.stfdet'); if (sd) { const t = $(sd.classList.contains('anchv') ? '[data-jz="anchors"]' : '[data-jz="stiff"]', m); if (t) t.scrollIntoView({ block: 'center' }); return; } const r2 = (sk.querySelector('svg') || sk).getBoundingClientRect(), x = ev.clientX - r2.left, y = ev.clientY - r2.top; const z = x < r2.width * 0.42 ? (y > r2.height * 0.75 ? 'sup' : 'plate') : 'bolts'; const t = $(`[data-jz="${z}"]`, m) || $('[data-jz]', m); if (t) { t.scrollIntoView({ block: 'center' }); Q.hlg(t.nextElementSibling || t); } }; };
   const draw = () => {
     const st = S(), r = R(); if (!r || !r.md || !st.podpory[i]) { closeM(); return; }
     const p = st.podpory[i], sp = r.md.sup[i], q = `podpory.${i}`;
@@ -216,6 +256,7 @@ A.supportPopup = function (i, focus) {
     m.innerHTML = h; m.style.display = 'flex'; $('.dlg.suppop', m).scrollTop = keep;
     if (window.innerWidth < 760) $('.spgrid', m).style.gridTemplateColumns = '1fr';
     A.bindFields(m, (re) => { if (re) draw(); });
+    A.bindAnchorFields(m, draw);
     $$('select[data-k$=".wezel.typ"]', m).forEach(sel => sel.addEventListener('change', () => { const p0 = S().podpory[i], t = p0.wezel.typ; p0.wezel = Object.assign({ typ: t }, BS.W.defaults(t, R().sec)); A.recalcNow(); draw(); }));
     $$('[data-jdes]', m).forEach(b2 => b2.addEventListener('click', () => A.jointDesigner({ sup: i })));
     $('#nClose', m).onclick = closeM; $('#spDes', m).onclick = () => A.jointDesigner({ sup: i });
