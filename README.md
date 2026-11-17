@@ -36,9 +36,9 @@ Aplikacja do analizy i projektowania belek stalowych według Eurokodów, przygot
 - Interakcje M–V, M–N i dwukierunkowa (6.41).
 
 **Środnik (PN-EN 1993-1-5)**
-- Wyboczenie przy ścinaniu z interakcją M–V (7.1).
-- Siły skupione na środnik z interakcją F–M (7.2).
-- Żebra podporowe (9.4).
+- Wyboczenie przy ścinaniu z interakcją M–V (7.1), osobno w każdym panelu środnika (długość panelu a wynika z położenia żeber).
+- Siły skupione na środnik z interakcją F–M (7.2); siła w miejscu żebra przenoszona przez żebro.
+- Żebra poprzeczne środnika w dowolnych miejscach (obustronne / jednostronne, b<sub>s</sub>, t<sub>s</sub>) lub rozmieszczone co a, także w osiach podpór: sztywność (9.3.3), wyboczenie żebra z siłą od pola ścinania (9.13) i siłą skupioną (9.4), wyboczenie skrętne (9.2.1(8)), docisk; żebro w osi podpory działa jako żebro podporowe (9.4).
 
 **Stateczność (PN-EN 1993-1-1, 6.3)**
 - M<sub>cr</sub> liczony MES dla rzeczywistego rozkładu momentu. Model uwzględnia wysokość przyłożenia obciążenia, monosymetrię (β<sub>z</sub>) i stężenia.
@@ -68,6 +68,7 @@ Aplikacja do analizy i projektowania belek stalowych według Eurokodów, przygot
 **Interfejs (jak w BelkaŻB / SłupŻB)**
 - Klikany schemat statyczny: lewy przycisk – zaznaczanie przęseł, prawy – menu (obciążenia, przekrój, stężenia, połączenia, styki, podpora), dwuklik – siła, stężenie, podpora montażowa lub styk w tym miejscu; legenda obciążeń z polami wyboru (uwzględnij / pomiń), wykres M / V / ugięcia / N / R pod schematem.
 - Chipy sprawdzeń nad danymi i wynikami (klik – miejsce w Podsumowaniu), przyciski „Dobierz przekrój”, „Dobierz połączenia”, „Dobierz wszystko” z wymaganym wytężeniem.
+- Widok 3D w zakładce „Belka i połączenia”: belka z przekroju, połączenia ze śrubami i spoinami, żebra, styki, elementy podpierające, stężenia; obrót, przesuw, przybliżenie, widoki podpór i styków; kliknięcie elementu otwiera jego okno.
 - Schematy typowe, wiele belek w projekcie, przekrój z klikanymi strefami, wykresy z kursorem i znacznikami wartości, Podsumowanie z odhaczaniem, objaśnieniami punktów norm i przejściem „pokaż →”.
 
 **Inne funkcje**
@@ -144,7 +145,8 @@ Testy porównują wyniki z rozwiązaniami zamkniętymi i danymi katalogowymi. Sz
 - profil normowy i zakaz mieszania generacji,
 - SHA-256 (wektory FIPS),
 - połączenia: F<sub>v,Rd</sub>, F<sub>t,Rd</sub>, F<sub>s,Rd</sub>, F<sub>b,Rd</sub>, β<sub>Lf</sub>, siły w grupie mimośrodowej, spoiny metodą kierunkową, rozerwanie blokowe, podział sił w styku (obliczenia ręczne); dobór wszystkich rodzajów połączeń,
-- raport pełny, statyki i tok obliczeń połączeń bez wartości NaN.
+- raport pełny, statyki i tok obliczeń połączeń bez wartości NaN,
+- żebra środnika: panele i k<sub>τ</sub>, λ̄<sub>w</sub>, siła w żebrze (9.13), sztywność (9.3.3), żebro w osi podpory.
 
 ## Struktura
 
@@ -165,7 +167,7 @@ src/engine/   silnik (bez DOM; działa w przeglądarce i w Node)
   projekt.js     stan domyślny, przebieg obliczeń, SGU, podpory, dobór
 src/ui/       interfejs: app.css, index.html, baza.js (narzędzia), app.js (dane, schemat, pliki),
               okna.js (okna dialogowe), projektant.js (projektowanie połączeń), widoki.js (zakładki),
-              rysunki.js, rys_wezly.js (rysunki), raport.js, odt.js (eksport .odt), objasnienia.js
+              rysunki.js, rys_wezly.js (rysunki), widok3d.js (widok 3D), raport.js, odt.js (eksport .odt), objasnienia.js
 host/         aplikacja okienkowa Windows (Go + WebView2)
 test/         testy weryfikacyjne (node:test)
 ```

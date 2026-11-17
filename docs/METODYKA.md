@@ -58,6 +58,13 @@ Dokument opisuje algorytmy silnika `BS-ENG 1.0.0` oraz punkty norm (1. generacja
 | Interakcja F–M: η<sub>2</sub> + 0,8η<sub>1</sub> ≤ 1,4 | 1-5: 7.2 |
 | Żebro podporowe: przekrój żeber + 2×15εt<sub>w</sub>, l = 0,75h<sub>w</sub>, krzywa c; docisk końców | 1-5: 9.4 |
 
+### Żebra poprzeczne środnika (`projekt.js`: `J.webStiff`, `J.panels`, `J.stiffChecks`)
+
+- Żebra: zadane w punktach (`zebraSrodnika`: x, obustronne / jednostronne, b<sub>s</sub>, t<sub>s</sub>) oraz rozmieszczone co a w przęsłach (opcjonalnie w osiach podpór). Wymiary domyślne: b<sub>s</sub> z szerokości pasa, t<sub>s</sub> z warunku b<sub>s</sub>/t<sub>s</sub> ≤ √(E/(5,3f<sub>y</sub>)).
+- Panele: granice – żebra pośrednie i podpory z żebrami podporowymi; panel ograniczony z obu stron ma a = odległość żeber (k<sub>τ</sub> wg zał. A.3), pozostałe a = ∞ (k<sub>τ</sub> = 5,34). V<sub>b,Rd</sub> i interakcja M–V (7.1) liczone w każdym punkcie z parametrami panelu.
+- Żebro pośrednie: przekrój współpracujący żebro + 2·15εt<sub>w</sub> (9.1(2)); sztywność I<sub>st</sub> ≥ 1,5h<sub>w</sub>³t³/a² (a/h<sub>w</sub> < √2) lub 0,75h<sub>w</sub>t³ (9.3.3(3)); siła N<sub>st</sub> = V<sub>Ed</sub> − f<sub>yw</sub>h<sub>w</sub>t/(√3γ<sub>M1</sub>λ̄<sub>w</sub>²) ≥ 0 (9.13) + siła skupiona w miejscu żebra; wyboczenie z płaszczyzny środnika – krzywa c, l = 0,75h<sub>w</sub> (9.4); wyboczenie skrętne I<sub>T</sub>/I<sub>p</sub> ≥ 5,3f<sub>y</sub>/E (9.2.1(8)); docisk końców pod siłą skupioną.
+- Siła skupiona w miejscu żebra nie jest sprawdzana na docisk środnika (rozdz. 6); żebro w osi podpory jest sprawdzane jako żebro podporowe (9.4), także jednostronne.
+
 ## 6. Stateczność (`statecznosc.js`, `mes.js`)
 
 **M<sub>cr</sub> z MES.** Każdy węzeł ma stopnie swobody u, u′, φ, φ′ (Hermite).

@@ -34,7 +34,7 @@ const mk = (id, html) => `<!--ck:${id}-->${html}<!--/ck:${id}-->`;
 const WYS = { pas_g: 'pas górny', srodek: 'środek ścinania', pas_d: 'pas dolny' };
 const SUPN = { przegub: 'przegubowa', utwierdzenie: 'utwierdzenie', sprezyna: 'sprężysta', podatne: 'przegub + sprężyna obrotowa' };
 const WEZN = { brak: 'oparcie na stali', oparcie: 'płyta podporowa', blacha_czolowa: 'krótka blacha czołowa', blacha_zebrowa: 'blacha żebrowa' };
-const V0 = (v, unit) => (v === null || v === undefined || !isFinite(v)) ? '—' : unit === 'MPa' ? f(v, 1) + ' MPa' : unit === 'M' ? f(v / 1e6) + ' kNm' : unit === 'F' ? f(v / 1e3) + ' kN' : unit === 'q' ? f(v, 1) + ' N/mm' : unit === 'mm' ? f(v, 1) + ' mm' : f(v, 3);
+const V0 = (v, unit) => (v === null || v === undefined || !isFinite(v)) ? '—' : unit === 'I' ? f(v / 1e4, 1) + ' cm⁴' : unit === 'MPa' ? f(v, 1) + ' MPa' : unit === 'M' ? f(v / 1e6) + ' kNm' : unit === 'F' ? f(v / 1e3) + ' kN' : unit === 'q' ? f(v, 1) + ' N/mm' : unit === 'mm' ? f(v, 1) + ' mm' : f(v, 3);
 RP.unitFmt = V0;
 
 /* ---------------------------------------------------------- dane wykresów (zakładka Wykresy i raport) */
@@ -77,8 +77,8 @@ RP.takeoff = function (S, R) {
     if (w.zebro && (sec.kind === 'I' || sec.kind === 'U')) { const hs = sec.hw || (sec.h - sec.tg - sec.td); rows.push({ poz: poz++, n: `Żebra podporowe – podpora ${p.id}`, mat: S.material.gatunek, szt: sec.kind === 'U' ? 1 : 2, wym: `${f(U.num(w.ts), 0)}×${f(U.num(w.bs), 0)}×${f(hs, 0)}`, m: (sec.kind === 'U' ? 1 : 2) * rho * U.num(w.ts) * U.num(w.bs) * hs }); weld += (sec.kind === 'U' ? 2 : 4) * hs; }
   });
   (R.styki || []).forEach((q, j) => { const o = q.o, s2 = S.styki[j] || {}; if (!o) return; if (o.geom && o.typ === 'nakladkowy') { const g = o.geom; rows.push({ poz: poz++, n: `Styk ${q.id} – nakładki pasów`, mat: (o.plf || {}).gat || S.material.gatunek, szt: g.tfi > 0 ? 6 : 2, wym: `${f(g.bfo, 0)}×${f(g.tfo, 0)}${g.tfi > 0 ? ` + 4×${f(g.bfi, 0)}×${f(g.tfi, 0)}` : ''}, l = ${f(g.Lf, 0)}`, m: 7.85e-6 * 2 * (g.bfo * g.tfo + (g.tfi > 0 ? 2 * g.bfi * g.tfi : 0)) * g.Lf }); rows.push({ poz: poz++, n: `Styk ${q.id} – nakładki środnika`, mat: (o.plw || {}).gat || S.material.gatunek, szt: 2, wym: `${f(g.hpw, 0)}×${f(g.tpw, 0)}, l = ${f(g.Lw, 0)}`, m: 7.85e-6 * 2 * g.hpw * g.tpw * g.Lw }); addB(o); } else if (s2.typ === 'spawany') weld += 2 * (sec.bg || sec.b || 0) + sec.h; });
-  const a = U.num((S.analiza || {}).zebraRozstaw) * 1000;
-  if (a > 0 && (sec.kind === 'I' || sec.kind === 'U')) { let n = 0; for (let x = a; x < md.L - 1; x += a) n++; if (n) { const hs = sec.hw || sec.h, bs = Math.max(40, Math.round(((sec.bg || 100) - (sec.tw || 0)) / 2 - 5)), ts = Math.max(6, Math.ceil((sec.tw || 6))); rows.push({ poz: poz++, n: 'Żebra pośrednie środnika (pary)', mat: S.material.gatunek, szt: 2 * n, wym: `${ts}×${bs}×${f(hs, 0)}`, m: 2 * n * rho * ts * bs * hs }); } }
+  const zg = {}; (R.zebra || []).forEach(z => { const nS = z.strona === 'jedna' ? 1 : 2, k = `${f(z.ts, 0)}×${f(z.bs, 0)}`; zg[k] = zg[k] || { n: 0, ts: z.ts, bs: z.bs }; zg[k].n += nS; });
+  const hsz = sec.hw || sec.h; Object.keys(zg).forEach(k => { const q = zg[k]; rows.push({ poz: poz++, n: 'Żebra poprzeczne środnika', mat: S.material.gatunek, szt: q.n, wym: `${k}×${f(hsz, 0)}`, m: q.n * rho * q.ts * q.bs * hsz }); weld += 2 * q.n * hsz; });
   const tot = rows.reduce((q, r) => q + r.m, 0);
   return { rows, total: tot, bolts, weld, surf: (sec.AmV ? null : null), area: R.pozar && R.pozar.sf ? null : null };
 };
@@ -156,9 +156,11 @@ RP.build = function (S, R, opt) {
       if (/^pt\d+$/.test(c.id)) t = patchTxt(c.d, c.n);
       else if (/-MV$/.test(c.id)) t = line(`<b>${esc(c.n)}</b> (x = ${f(c.x / 1000)} m): η̄<sub>1</sub> = M<sub>Ed</sub>/M<sub>pl,Rd</sub> = ${f(c.d.im.e1, 3)}, η̄<sub>3</sub> = V<sub>Ed</sub>/V<sub>bw,Rd</sub> = ${f(c.d.im.e3, 3)}; ${esc(c.d.im.f)} → ${f(c.util, 3)}${okS(c.util)}`, '7.1');
       else if (/-Vb$/.test(c.id)) t = line(`<b>${esc(c.n)}</b> (x = ${f(c.x / 1000)} m; ${esc(c.combo)}): V<sub>Ed</sub>/V<sub>b,Rd</sub> = ${kN(c.Ed)}/${kN(c.Rd)} = ${f(c.util, 3)}${okS(c.util)}`, '5.2');
+      else if (/^ZS\d/.test(c.id)) t = line(`<b>${esc(c.n)}</b>${c.f ? `: ${esc(c.f)}` : ''} → ${f(c.util, 3)} ≤ 1,0${okS(c.util)}`, c.ref);
       else t = line(`<b>${esc(c.n)}</b>: ${f(c.d.eta2, 3)} + 0,8·${f(c.d.eta1, 3)} = ${f(c.Ed, 3)} ≤ 1,4${okS(c.util)}`, '7.2');
       h += mk(c.id, t);
     });
+    if ((R.zebra || []).length) h += '<h3>Żebra poprzeczne środnika i panele</h3>' + line(`Żebra: ${R.zebra.map(z => `x = ${f(z.x / 1000)} m (${z.strona === 'jedna' ? 'jednostronne' : 'obustronne'} ${f(z.bs, 0)}×${f(z.ts, 0)} mm)`).join('; ')}`) + (R.panels || []).map(q => line(`Panel ${f(q.x0 / 1000)}–${f(q.x1 / 1000)} m: a = ${isFinite(q.a) ? f(q.a, 0) + ' mm' : '∞'}, k<sub>τ</sub> = ${f(q.sb.kt, 3)}, λ̄<sub>w</sub> = ${f(q.sb.lw, 3)}, χ<sub>w</sub> = ${f(q.sb.chi, 3)}, V<sub>b,Rd</sub> = ${kN(q.sb.Vb)} kN`, '5.2, 5.3')).join('');
   }
   // ---------------------------------------------------------- 7. stateczność
   h += H2('SGN – stateczność: zwichrzenie i interakcja (PN-EN 1993-1-1, 6.3)');

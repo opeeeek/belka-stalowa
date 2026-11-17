@@ -334,8 +334,9 @@ R.stiffener = function (sec, b, ndp, o) {
   const lw = 15 * eps * tw;
   const left = o.koniec ? Math.min(lw, Math.max(0, o.e || 0)) : lw;
   const right = lw;
-  const As = 2 * bs * ts + (left + right + ts) * tw;
-  const Is = ts * Math.pow(2 * bs + tw, 3) / 12 + (left + right) * Math.pow(tw, 3) / 12;
+  const nS = o.jedno ? 1 : 2;
+  const As = nS * bs * ts + (left + right + ts) * tw;
+  const Is = o.jedno ? ts * Math.pow(bs, 3) / 3 + (left + right) * Math.pow(tw, 3) / 12 : ts * Math.pow(2 * bs + tw, 3) / 12 + (left + right) * Math.pow(tw, 3) / 12;
   const i = Math.sqrt(Is / As);
   const Lcr = (o.pasyUstalone === false ? 1.0 : 0.75) * hw;
   const lam1 = 93.9 * eps, lam = Lcr / (i * lam1);
@@ -343,7 +344,7 @@ R.stiffener = function (sec, b, ndp, o) {
   const ph = 0.5 * (1 + al * (lam - 0.2) + lam * lam);
   const chi = Math.min(1, 1 / (ph + Math.sqrt(ph * ph - lam * lam)));
   const NbRd = chi * As * fy / ndp.gM1;
-  const Acont = 2 * Math.max(0, bs - (o.ch || 0)) * ts;
+  const Acont = nS * Math.max(0, bs - (o.ch || 0)) * ts;
   const Fbear = Acont * fy / ndp.gM0;
   // wymagana sztywność/smukłość ścianek żebra (pas wspornikowy kl. 3: bs/ts ≤ 14ε)
   const ctS = bs / ts, ctLim = 14 * eps;

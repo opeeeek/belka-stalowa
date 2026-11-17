@@ -76,8 +76,7 @@ const GROUPS = [
     { k: ND('kcMet'), t: 'sel', l: 'Współczynnik k_{c}', o: [['tab66', 'tabl. 6.6 / 1/√C₁ (MES)'], ['1', 'k_c = 1 (f = 1, bezpiecznie)']], wide: true },
     { k: 'analiza.muY', t: 'num', l: 'Wyboczenie w płaszczyźnie μ_{y}', list: [0.5, 0.7, 0.85, 1, 1.5, 2], min: 0.1 },
     { k: 'analiza.muZ', t: 'num', l: 'Wyboczenie z płaszczyzny μ_{z}', list: [0.5, 0.7, 0.85, 1], min: 0.1 },
-    { k: 'analiza.zebraRozstaw', t: 'num', l: 'Rozstaw żeber środnika a', u: 'm', list: [0, 0.5, 1, 1.5, 2, 2.5, 3], min: 0, ph: '0 – brak' },
-    { k: 'analiza.slupekSztywny', t: 'chk', l: 'Sztywny słupek podporowy (wyboczenie środnika przy ścinaniu)' },
+    { t: 'html', h: () => stiffSummaryHTML() },
     { t: 'hint', ex: true, exT: 'Jak liczony jest moment krytyczny M_cr?', h: () => 'M<sub>cr</sub> wyznacza metoda elementów skończonych (u, u′, φ, φ′) dla rzeczywistego rozkładu M<sub>y</sub> z każdej decydującej kombinacji i każdego etapu – z wysokością przyłożenia obciążeń (pas górny / środek ścinania / pas dolny), monosymetrią przekroju i wszystkimi stężeniami. Postać zwichrzenia – zakładka <b>Stateczność</b>.' }
   ] },
   { id: 'conn', title: 'Połączenia i styki', items: [
@@ -168,6 +167,11 @@ function connSummaryHTML() {
   R.md.sup.forEach((p, i) => { const rp = (R.podpory || []).find(q => q.id === p.id) || { checks: [] }; h += row(`Podpora ${p.id}`, J.jointTxt((S.podpory[i] || {}).wezel || {}, R.sec), rp.checks, `data-cjs="${i}"`); });
   (S.styki || []).forEach((st2, j) => { const cs = R.checks.filter(c => c.id.indexOf(`S${j + 1}-`) === 0); h += row(`Styk S${j + 1}`, `x = ${fmt(U.num(st2.x), 2)} m – ${(BS.W.STYKI[st2.typ] || '')}`, cs, `data-cjt="${j}"`); });
   return h + `</table><div class="row wide"><span></span><span><button class="btn sm pri" data-act="jdes" type="button">Projektowanie połączeń…</button></span></div>`;
+}
+function stiffSummaryHTML() {
+  if (!R || !R.md || !R.sec || !(R.sec.kind === 'I' || R.sec.kind === 'U')) return '';
+  const Z = R.zebra || [], cs = (R.checks || []).filter(c => /^ZS\d/.test(c.id)), bad = cs.some(c => c.status === 'fail'), um = Math.max(0, ...cs.map(c => c.util || 0));
+  return `<div class="row wide"><label>Żebra poprzeczne środnika</label><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="hint" style="margin:0">${Z.length ? `${Z.length} szt.${cs.length ? ` · <span class="st ${bad ? 'fail' : 'ok'}">${bad ? '✖' : '✔'} ${fmt(um * 100, 0)}%</span>` : ''}` : 'brak'}</span><button class="btn sm" data-act="stiff" type="button">Żebra środnika…</button></span></div>`;
 }
 function loadMiniHTML() {
   const n = S.obciazenia.length, on = S.obciazenia.filter(o => o.aktywne !== false).length;
@@ -451,7 +455,7 @@ function renderDataSide() {
   const leg = [], out = {};
   const svg = D.scheme(S, R, { W: W2, etap: s, edit: true, sel: selSpans, diag: diagMode === 'off' ? null : diagMode, legend: leg, dims: showDims, out });
   const sel = selList().map(i => md.seg[i].n);
-  const tools = `<span class="schtools">${[['loads', 'Obciążenia', 'Okno obciążeń: zaznaczonych przęseł albo całej belki'], ['sec', 'Przekrój', 'Przekrój i materiał belki'], ['conn', 'Połączenia', 'Okno projektowania połączeń i styków'], ['brace', 'Stężenia', 'Stężenia boczne i skrętne, stężenie ciągłe'], ['stages', 'Etapy', 'Etapy realizacji i podpory montażowe'], ['dims', 'Wymiary', 'Pokaż / ukryj wymiary']].map(([k, l, t]) => `<button class="btn sm${k === 'dims' && showDims ? ' on' : ''}" data-tool="${k}" type="button" title="${t}">${l}</button>`).join('')}</span>`;
+  const tools = `<span class="schtools">${[['loads', 'Obciążenia', 'Okno obciążeń: zaznaczonych przęseł albo całej belki'], ['sec', 'Przekrój', 'Przekrój i materiał belki'], ['conn', 'Połączenia', 'Okno projektowania połączeń i styków'], ['stiff', 'Żebra', 'Żebra poprzeczne środnika'], ['brace', 'Stężenia', 'Stężenia boczne i skrętne, stężenie ciągłe'], ['stages', 'Etapy', 'Etapy realizacji i podpory montażowe'], ['dims', 'Wymiary', 'Pokaż / ukryj wymiary']].map(([k, l, t]) => `<button class="btn sm${k === 'dims' && showDims ? ' on' : ''}" data-tool="${k}" type="button" title="${t}">${l}</button>`).join('')}</span>`;
   const seen = new Set(), legH = leg.filter(q => { const k = String(q.li); if (seen.has(k)) return false; seen.add(k); return true; }).map(q => `<label class="ldl${q.off ? ' off' : ''}" style="top:${(q.y / (out.H || 1) * 100).toFixed(2)}%" title="${q.sw ? 'Ciężar własny belki' : q.off ? 'Obciążenie pominięte – zaznacz, aby uwzględnić' : 'Odznacz, aby pominąć obciążenie w obliczeniach'}"><input type="checkbox" data-ldon="${q.li}" ${q.off ? '' : 'checked'}><i style="background:${q.col}"></i><span>${esc(q.lab)}</span></label>`).join('');
   const dgSw = `<span class="segsw sm dgsw">${[['M', 'M'], ['V', 'V'], ['w', 'ugięcie'], ['N', 'N'], ['R', 'R'], ['off', 'bez wykresu']].map(([k, l]) => `<button type="button" data-dgm="${k}" class="${diagMode === k ? 'on' : ''}">${l}</button>`).join('')}</span>`;
   const stSw = md.nE > 1 ? `<span class="segsw sm">${md.etapy.map((e, i) => `<button type="button" data-stg="${i}" class="${i === s ? 'on' : ''}" title="${esc(e.nazwa)}">Etap ${i + 1}</button>`).join('')}</span>` : '';
@@ -512,6 +516,7 @@ function bindSide(el) {
   $$('.tsupp, tr[data-tmp], button[data-tmp]', el).forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); A.stagesPopup(); }));
   $$('.rst', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.bracePopup(g.dataset.rst === 'g' ? null : +g.dataset.rst); }));
   $$('.sty', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.jointDesigner({ styk: +g.dataset.sty }); }));
+  $$('.stf', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.stiffPopup(g.dataset.stf === 'g' ? null : +g.dataset.stf); }));
   $$('[data-cont]', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.bracePopup(); }));
   $$('.elm', el).forEach(g => g.addEventListener('click', ev => { const k = +g.dataset.seg; if (selSpans.has(k)) selSpans.delete(k); else selSpans.add(k); renderDataSide(); }));
   $$('.ld', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); const li = g.dataset.li; if (li === 'sw') { const f = $('[data-ck="ciezarWlasny.auto"]', el); if (f) Q.flash(f.closest('label')); return; } A.loadPopup({ focus: +li }); }));
@@ -555,6 +560,8 @@ function schemeAct(a) {
   else if (a === 'none') { selSpans.clear(); renderDataSide(); }
   else if (a === 'schemes') A.schemesPopup();
   else if (a === 'conn') A.jointDesigner();
+  else if (a === 'stiff') A.stiffPopup();
+  else if (a === 'stiffmid') { const sl = selList(); const Z = S.zebraSrodnika; (sl.length ? sl : R.md.seg.map((z, i) => i)).forEach(i => { const z = R.md.seg[i]; if (!z || z.wsp) return; const x = +((z.x0 + z.x1) / 2000).toFixed(3); if (!Z.some(q => Math.abs(U.num(q.x) - x) < 0.02)) Z.push({ x, strona: 'obie', bs: '', ts: '' }); }); Z.sort((p, q) => U.num(p.x) - U.num(q.x)); changed(true); recalc(); A.stiffPopup(); }
   else if (a === 'splice') { const sl = selList(); const sg = R.md.seg[sl.length ? sl[0] : 0]; A.addSplice(sg ? +((sg.x0 + sg.x1) / 2000).toFixed(2) : undefined); }
 }
 A.schemeAct = schemeAct;
@@ -591,7 +598,7 @@ function braceMenu(x, y, src) {
 }
 function schemeMenu(x, y) {
   const n = selSpans.size, md = R.md;
-  const it = [['loads', n ? `Obciążenia – ${n === 1 ? md.seg[selList()[0]].n : `zaznaczone (${n})`}…` : 'Obciążenia – cała belka…'], ['sec', 'Przekrój…'], ['brace', 'Stężenia boczne…'], ['stages', 'Etapy realizacji i podpory montażowe…'], ['schemes', 'Schematy typowe…'], ['conn', 'Projektowanie połączeń…'], ['splice', n ? 'Styk montażowy w środku zaznaczonego przęsła…' : 'Styk montażowy…'], ['dims', `${showDims ? '✓ ' : ''}Wymiary`], ['-'], ['all', 'Zaznacz wszystkie przęsła'], ['none', 'Odznacz wszystko (Esc)', !n]];
+  const it = [['loads', n ? `Obciążenia – ${n === 1 ? md.seg[selList()[0]].n : `zaznaczone (${n})`}…` : 'Obciążenia – cała belka…'], ['sec', 'Przekrój…'], ['brace', 'Stężenia boczne…'], ['stages', 'Etapy realizacji i podpory montażowe…'], ['schemes', 'Schematy typowe…'], ['conn', 'Projektowanie połączeń…'], ['stiff', 'Żebra środnika…'], ['stiffmid', n ? 'Żebro w środku zaznaczonego przęsła' : 'Żebra w środkach przęseł'], ['splice', n ? 'Styk montażowy w środku zaznaczonego przęsła…' : 'Styk montażowy…'], ['dims', `${showDims ? '✓ ' : ''}Wymiary`], ['-'], ['all', 'Zaznacz wszystkie przęsła'], ['none', 'Odznacz wszystko (Esc)', !n]];
   Q.ctxMenu(x, y, it.map(([k, l, d]) => [k, esc(l || ''), d]), schemeAct);
 }
 
@@ -700,7 +707,7 @@ function about() {
 }
 function doAct(a) {
   ({ new: newProject, open: openFile, save: () => saveFile(false), saveas: () => saveFile(true), print: doPrint, exporthtml: () => BS.V.exportHTML(), about,
-    schemes: () => A.schemesPopup(), jdes: () => A.jointDesigner(), addsplice: () => A.addSplice(), secwin: () => A.secPopup(), sectab: () => A.secTablePopup(), loads: () => A.loadPopup({ all: true }), snow: () => A.snowPopup() }[a] || (() => {}))();
+    schemes: () => A.schemesPopup(), stiff: () => A.stiffPopup(), jdes: () => A.jointDesigner(), addsplice: () => A.addSplice(), secwin: () => A.secPopup(), sectab: () => A.secTablePopup(), loads: () => A.loadPopup({ all: true }), snow: () => A.snowPopup() }[a] || (() => {}))();
 }
 A.doAct = doAct;
 

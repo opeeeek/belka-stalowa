@@ -35,7 +35,8 @@ J.defaultState = function () {
     ],
     stezenia: [{ x: 3.0, typ: 'boczne', wys: 'pas_g', odEtapu: 0, bocznieY: true }],
     stezenieCiagle: { pasG: true, odEtapu: 1, pasD: false, odEtapuD: 1 },
-    analiza: { muY: 1.0, muZ: 1.0, zebraRozstaw: 0, slupekSztywny: false },
+    analiza: { muY: 1.0, muZ: 1.0, zebraRozstaw: 0, zebraBs: '', zebraTs: '', zebraPodpory: true, slupekSztywny: false },
+    zebraSrodnika: [],
     sgu: { typ: 'strop', wmax: 250, w3: 350, podniesienie: 'brak', wc: 0, drgania: true, fmin: 3.0, uLim: 200 },
     pozar: { aktywny: false, R: 60, ekspozycja: '3', ochrona: 'brak', dp: 20, lp: 0.12, cp: 1200, rp: 300, kappa1: '' },
     zmeczenie: { aktywny: false, przypadki: [], n: 2e6, phi: 1.0, zmiennyZnak: false, ocena: 'tolerancja', skutki: 'duze', detale: [{ k: 'w160', miejsce: 'pas_d', dc: 160 }], dtc: 100 },
@@ -57,7 +58,7 @@ J.normalize = function (st) {
   const nS = (o.geom.przesla || []).length + 1;
   o.podpory = (o.podpory || []).slice(0, nS);
   while (o.podpory.length < nS) o.podpory.push({ typ: 'przegub', ltb: 'widelkowe', ss: 100, c: 0, wezel: { typ: 'brak' } });
-  ['obciazenia', 'etapy', 'stezenia', 'podporyTymczasowe', 'styki'].forEach(k => { if (!Array.isArray(o[k])) o[k] = []; });
+  ['obciazenia', 'etapy', 'stezenia', 'podporyTymczasowe', 'styki', 'zebraSrodnika'].forEach(k => { if (!Array.isArray(o[k])) o[k] = []; });
   if (!o.etapy.length) o.etapy = [{ id: 'E1', nazwa: 'Eksploatacja', typ: 'eksploatacja', opis: '' }];
   if (/^c[234]$/.test(o.schemat)) o.schemat = 'ciagla';
   o.format = BS.FORMAT;
@@ -109,7 +110,11 @@ J.run = function (st0, opt) {
   const combos = gk.list; out.combos = combos;
   const finalS = md.nE - 1;
   const ns = an.ns, xs = an.xs;
-  const sb = R.shearBuckling(sec, base, ndp, { a: U.num(st.analiza.zebraRozstaw) * 1000, sztywny: !!st.analiza.slupekSztywny });
+  // żebra poprzeczne środnika i panele (PN-EN 1993-1-5, 5): granice paneli – żebra pośrednie i podpory z żebrami
+  const zebra = J.webStiff(st, md, sec); out.zebra = zebra;
+  const panels = J.panels(st, md, sec, base, ndp, zebra); out.panels = panels;
+  const sbPts = Array.from(xs, x => { const q = panels.find(pn => x >= pn.x0 - 1e-6 && x <= pn.x1 + 1e-6); return q ? q.sb : panels[0].sb; });
+  const sb = panels.reduce((m2, q) => (!m2 || q.sb.Vb < m2.Vb ? q.sb : m2), null);
   out.sb = sb;
   (sec.uwagi || []).forEach(u => out.info.push(u));
   const reg = {}; // najbardziej wytężone wystąpienie każdego sprawdzenia
@@ -154,11 +159,12 @@ J.run = function (st0, opt) {
       if (better(kp.V, p.uV)) rec(kp.V, { util: p.uV, V: E.V[i], M: E.M[i], p, x: xs[i], combo: c, etap: c.etap });
       if (E.Vy[i] !== 0 && better(kp.Vy, p.uVy)) rec(kp.Vy, { util: p.uVy, V: E.Vy[i], p, x: xs[i], combo: c, etap: c.etap });
       if (Math.abs(E.N) > 1 && better(kp.N, p.uN)) rec(kp.N, { util: p.uN, N: E.N, p, x: xs[i], combo: c, etap: c.etap });
-      if (sb.need) {
-        const ub = Math.abs(E.V[i]) / sb.Vb;
-        if (better(kp.Vb, ub)) rec(kp.Vb, { util: ub, V: E.V[i], x: xs[i], combo: c, etap: c.etap });
-        const im = R.interMV(base, sb, E.M[i], E.V[i]);
-        if (better(kp.MV, im.u)) rec(kp.MV, { util: im.u, im, M: E.M[i], V: E.V[i], x: xs[i], combo: c, etap: c.etap });
+      const sbi = sbPts[i];
+      if (sbi.need) {
+        const ub = Math.abs(E.V[i]) / sbi.Vb;
+        if (better(kp.Vb, ub)) rec(kp.Vb, { util: ub, V: E.V[i], x: xs[i], combo: c, etap: c.etap, sb: sbi });
+        const im = R.interMV(base, sbi, E.M[i], E.V[i]);
+        if (better(kp.MV, im.u)) rec(kp.MV, { util: im.u, im, M: E.M[i], V: E.V[i], x: xs[i], combo: c, etap: c.etap, sb: sbi });
       }
     }
     // kandydaci do zwichrzenia: max |M| w segmentach
@@ -191,20 +197,24 @@ J.run = function (st0, opt) {
     if (vy && vy.util > 1e-6) out.checks.push(BS.check({ id: `${s}-Vy`, grp: g, etap: s, n: 'Ścinanie Vy (pasy)', ref: '6.2.6', Ed: Math.abs(vy.V), Rd: base.Vplz_y, unit: 'F', util: vy.util, x: vy.x, combo: fmtCombo(vy.combo), d: vy }));
     const nn = reg[`${s}|N`];
     if (nn && nn.util > 1e-6) out.checks.push(BS.check({ id: `${s}-N`, grp: g, etap: s, n: nn.N > 0 ? 'Rozciąganie' : 'Ściskanie (nośność przekroju)', ref: nn.N > 0 ? '6.2.3' : '6.2.4', Ed: Math.abs(nn.N), Rd: nn.N > 0 ? base.Npl : base.Nc, unit: 'F', util: nn.util, x: nn.x, combo: fmtCombo(nn.combo), d: nn }));
-    if (sb.need) {
-      const b = reg[`${s}|Vb`]; if (b) out.checks.push(BS.check({ id: `${s}-Vb`, grp: `PN-EN 1993-1-5 – środnik${stName(s)}`, etap: s, n: 'Wyboczenie przy ścinaniu', ref: 'PN-EN 1993-1-5, 5.2', Ed: Math.abs(b.V), Rd: sb.Vb, unit: 'F', util: b.util, x: b.x, combo: fmtCombo(b.combo), d: b }));
+    if (panels.some(q => q.sb.need)) {
+      const b = reg[`${s}|Vb`]; if (b) out.checks.push(BS.check({ id: `${s}-Vb`, grp: `PN-EN 1993-1-5 – środnik${stName(s)}`, etap: s, n: `Wyboczenie przy ścinaniu (panel a = ${b.sb.a === Infinity ? '∞' : U.fmt(b.sb.a / 1000, 2) + ' m'})`, ref: 'PN-EN 1993-1-5, 5.2', Ed: Math.abs(b.V), Rd: b.sb.Vb, unit: 'F', util: b.util, x: b.x, combo: fmtCombo(b.combo), d: b }));
       const i7 = reg[`${s}|MV71`]; if (i7) out.checks.push(BS.check({ id: `${s}-MV`, grp: `PN-EN 1993-1-5 – środnik${stName(s)}`, etap: s, n: 'Interakcja M–V (wyboczenie przy ścinaniu)', ref: 'PN-EN 1993-1-5, 7.1', Ed: i7.util, Rd: 1, unit: '-', util: i7.util, x: i7.x, combo: fmtCombo(i7.combo), d: i7 }));
     }
   }
-  if (!sb.need) out.info.push(`Środnik: hw/tw = ${U.fmt(sb.ht, 1)} ≤ ${U.fmt(sb.limit, 1)} – sprawdzenie wyboczenia przy ścinaniu nie jest wymagane (PN-EN 1993-1-5, 5.1(2)).`);
+  if (!panels.some(q => q.sb.need)) out.info.push(`Środnik: hw/tw = ${U.fmt(sb.ht, 1)} ≤ ${U.fmt(sb.limit, 1)} – sprawdzenie wyboczenia przy ścinaniu nie jest wymagane (PN-EN 1993-1-5, 5.1(2)).`);
   // --- siły skupione na środnik (poza podporami)
   ptLoads.forEach((pl, k) => {
     const r = ptRes[k]; if (!r || r.F <= 0) return;
-    const pr = R.patch(sec, base, ndp, { F: r.F, ss: pl.ss, typ: 'a', pas: pl.wys === 'pas_d' ? 'd' : 'g', a: U.num(st.analiza.zebraRozstaw) * 1000 });
+    const zs = zebra.find(z => Math.abs(z.x - pl.x) <= Math.max(30, U.num(pl.ss) / 2)); if (zs) { zs.F = Math.max(zs.F || 0, r.F); return; }
+    const pnl = panels.find(q => pl.x >= q.x0 - 1e-6 && pl.x <= q.x1 + 1e-6);
+    const pr = R.patch(sec, base, ndp, { F: r.F, ss: pl.ss, typ: 'a', pas: pl.wys === 'pas_d' ? 'd' : 'g', a: pnl && isFinite(pnl.a) ? pnl.a : 0 });
     const e1 = Math.abs(r.M) / (Math.min(sec.Wel_t, sec.Wel_b) * base.fy / ndp.gM0);
     out.checks.push(BS.check({ id: `pt${k}`, grp: `PN-EN 1993-1-5 – środnik${stName(pl.etap)}`, etap: pl.etap, n: `Siła skupiona na środnik (x = ${U.fmt(pl.x / 1000, 2)} m)`, ref: 'PN-EN 1993-1-5, 6.2', Ed: r.F, Rd: pr.FRd, unit: 'F', util: pr.u, x: pl.x, combo: fmtCombo(r.combo), d: pr }));
     out.checks.push(BS.check({ id: `pt${k}i`, grp: `PN-EN 1993-1-5 – środnik${stName(pl.etap)}`, etap: pl.etap, n: `Interakcja F–M (x = ${U.fmt(pl.x / 1000, 2)} m)`, ref: 'PN-EN 1993-1-5, 7.2', Ed: pr.u + 0.8 * e1, Rd: 1.4, unit: '-', util: (pr.u + 0.8 * e1) / 1.4, x: pl.x, combo: fmtCombo(r.combo), d: { eta1: e1, eta2: pr.u } }));
   });
+  // --- żebra poprzeczne środnika (PN-EN 1993-1-5, 9.1–9.4)
+  J.stiffChecks(st, md, sec, base, ndp, zebra, panels, env, xs, out);
   // --- zwichrzenie i interakcja (każdy etap)
   out.ltb = [];
   for (let s = 0; s < md.nE; s++) {
@@ -368,14 +378,17 @@ J.supports = function (st, md, an, combos, sec, base, mat, ndp, env, out) {
     if (conn && w.typ !== 'spawane' && !(sec.kind === 'I' || sec.kind === 'U')) { out.errors.push(`Podpora ${p.id}: połączenie śrubowe przez środnik (blacha czołowa / żebrowa / kątowniki) jest obsługiwane dla dwuteowników i ceowników – dla ${sec.kind === 'RHS' ? 'rur' : 'kątowników'} wybierz połączenie spawane lub oparcie.`); conn = false; }
     // docisk środnika / żebro
     if (!conn && Rmax > 0 && sec.kind !== 'L') {
-      if (w.zebro && (sec.kind === 'I' || sec.kind === 'U')) {
-        const sr = R.stiffener(sec, base, ndp, { F: Rmax, bs: U.num(w.bs, 80), ts: U.num(w.ts, 10), ch: U.num(w.ch, 15), koniec: isEnd, e: U.num(p.src && p.src.c, 0) + U.num(p.ss) / 2 });
+      const zSup = (out.zebra || []).find(z => Math.abs(z.x - p.x) <= 30);
+      if ((w.zebro || zSup) && (sec.kind === 'I' || sec.kind === 'U')) {
+        const sr = R.stiffener(sec, base, ndp, { F: Rmax, bs: w.zebro ? U.num(w.bs, 80) : zSup.bs, ts: w.zebro ? U.num(w.ts, 10) : zSup.ts, ch: U.num(w.ch, 15), koniec: isEnd, e: U.num(p.src && p.src.c, 0) + U.num(p.ss) / 2, jedno: !w.zebro && zSup.strona === 'jedna' });
+        if (zSup) zSup.podpora = p.id;
         r.zebro = sr;
         r.checks.push(BS.check({ id: `${p.id}-ZB`, grp, n: 'Żebro podporowe – wyboczenie (przekrój krzyżowy z 15εtw)', ref: 'PN-EN 1993-1-5 9.4; PN-EN 1993-1-1 6.3.1', Ed: Rmax, Rd: sr.NbRd, unit: 'F', util: sr.uB, x: p.x, combo: cMax !== null ? combos[cMax].opis : '', d: sr }));
         r.checks.push(BS.check({ id: `${p.id}-ZD`, grp, n: 'Żebro podporowe – docisk końców żeber', ref: 'PN-EN 1993-1-1 6.2.4', Ed: Rmax, Rd: sr.Fbear, unit: 'F', util: sr.uC, x: p.x, combo: '', d: sr }));
         if (sr.ctS > sr.ctLim) r.checks.push(BS.check({ id: `${p.id}-ZC`, grp, n: 'Żebro – smukłość ścianki bs/ts', ref: 'PN-EN 1993-1-5 9.2.1(8)', Ed: sr.ctS, Rd: sr.ctLim, unit: '-', util: sr.ctS / sr.ctLim, d: sr }));
       } else {
-        const pr = R.patch(sec, base, ndp, { F: Rmax, ss: U.num(p.ss, 0), typ: isEnd ? 'c' : 'a', c: U.num(p.src && p.src.c, 0), pas: 'd', a: U.num(st.analiza.zebraRozstaw) * 1000 });
+        const pnl = (out.panels || []).find(q => p.x >= q.x0 - 1e-6 && p.x <= q.x1 + 1e-6);
+        const pr = R.patch(sec, base, ndp, { F: Rmax, ss: U.num(p.ss, 0), typ: isEnd ? 'c' : 'a', c: U.num(p.src && p.src.c, 0), pas: 'd', a: pnl && isFinite(pnl.a) ? pnl.a : 0 });
         r.patch = pr;
         r.checks.push(BS.check({ id: `${p.id}-PL`, grp, n: `Docisk środnika nad podporą (typ ${isEnd ? 'c' : 'a'})`, ref: 'PN-EN 1993-1-5 6.2–6.5', Ed: Rmax, Rd: pr.FRd, unit: 'F', util: pr.u, x: p.x, combo: cMax !== null ? combos[cMax].opis : '', d: pr }));
         if (!isEnd && Mmax > 0) {
@@ -401,6 +414,76 @@ J.supports = function (st, md, an, combos, sec, base, mat, ndp, env, out) {
 };
 
 
+
+/* ---------------------------------------------------------- żebra poprzeczne środnika */
+// lista żeber: zadane w punktach (st.zebraSrodnika) + rozmieszczone co a w przęsłach (st.analiza.zebraRozstaw)
+J.stiffAuto = function (sec) {
+  const tw = sec.tw || 6, bf = sec.kind === 'U' ? sec.b : Math.min(sec.bg || 100, sec.bd || 100);
+  const bs = Math.max(30, Math.floor((sec.kind === 'U' ? bf - tw - 5 : (bf - tw) / 2 - 5) / 5) * 5);
+  const ts = Math.max(6, Math.ceil(Math.max(tw, bs / Math.sqrt(U.E / (5.3 * 355))) / 2) * 2);
+  return { bs, ts };
+};
+J.webStiff = function (st, md, sec) {
+  if (!(sec.kind === 'I' || sec.kind === 'U')) return [];
+  const au = J.stiffAuto(sec), out = [];
+  (st.zebraSrodnika || []).forEach((z, j) => { const x = U.num(z.x) * 1000; if (x < -1 || x > md.L + 1) return; out.push({ src: j, x: U.clamp(x, 0, md.L), strona: sec.kind === 'U' ? 'jedna' : (z.strona === 'jedna' ? 'jedna' : 'obie'), bs: U.num(z.bs, au.bs) || au.bs, ts: U.num(z.ts, au.ts) || au.ts }); });
+  const a = U.num((st.analiza || {}).zebraRozstaw) * 1000;
+  if (a > 0) {
+    const xs = md.sup.map(p => p.x).sort((p, q) => p - q), bs = U.num(st.analiza.zebraBs, au.bs) || au.bs, ts = U.num(st.analiza.zebraTs, au.ts) || au.ts;
+    const atSup = st.analiza.zebraPodpory !== false;
+    for (let i = 0; i < xs.length - 1; i++) { const L = xs[i + 1] - xs[i], n = Math.ceil(L / a - 1e-9); for (let k = atSup ? 0 : 1; k <= (atSup ? n : n - 1); k++) { const x = xs[i] + L * k / n; if (!out.some(z => Math.abs(z.x - x) < 20)) out.push({ src: 'g', x, strona: sec.kind === 'U' ? 'jedna' : 'obie', bs, ts }); } }
+  }
+  return out.sort((p, q) => p.x - q.x);
+};
+// panele środnika: granice – żebra pośrednie i podpory z żebrami podporowymi; poza nimi a = ∞
+J.panels = function (st, md, sec, base, ndp, zebra) {
+  const B = zebra.map(z => z.x);
+  md.sup.forEach((p, i) => { const w = (st.podpory[i] || {}).wezel || {}; if (w.zebro && !B.some(x => Math.abs(x - p.x) < 20)) B.push(p.x); });
+  B.sort((p, q) => p - q);
+  const cuts = [0].concat(B.filter(x => x > 1 && x < md.L - 1)).concat([md.L]).filter((v, i, a) => i === 0 || v - a[i - 1] > 1);
+  const out = [];
+  for (let i = 0; i < cuts.length - 1; i++) {
+    const x0 = cuts[i], x1 = cuts[i + 1], bounded = B.some(x => Math.abs(x - x0) < 21) && B.some(x => Math.abs(x - x1) < 21);
+    const a = bounded ? x1 - x0 : Infinity;
+    out.push({ x0, x1, a, sb: R.shearBuckling(sec, base, ndp, { a, sztywny: !!st.analiza.slupekSztywny }) });
+  }
+  return out;
+};
+// sprawdzenia żeber pośrednich (9.3.3, 9.2.1(8), 9.4) i żeber pod siłami skupionymi
+J.stiffChecks = function (st, md, sec, base, ndp, zebra, panels, env, xs, out) {
+  if (!zebra.length) return;
+  const fy = base.fy, eps = base.eps, tw = sec.tw, hw = sec.hw, E = U.E, g1 = ndp.gM1;
+  const grp = 'PN-EN 1993-1-5 – żebra poprzeczne środnika';
+  zebra.forEach((z, j) => {
+    if (md.sup.some(p => Math.abs(p.x - z.x) <= 30)) return;          // żebro podporowe – sprawdzane w podporze
+    const id = `ZS${j + 1}`, nm = `Żebro x = ${U.fmt(z.x / 1000, 2)} m (${z.strona === 'jedna' ? 'jednostronne' : 'obustronne'} ${U.fmt(z.bs, 0)}×${U.fmt(z.ts, 0)})`;
+    // przekrój współpracujący: żebro + 2 × 15εt_w środnika (9.1(2))
+    const lw = 15 * eps * tw, two = z.strona !== 'jedna';
+    const parts = two ? [[2 * z.bs + tw, z.ts, 0], [2 * lw, tw, 0]] : [[z.bs, z.ts, tw / 2 + z.bs / 2], [2 * lw + z.ts, tw, 0]];
+    const As = parts.reduce((s2, q) => s2 + q[0] * q[1], 0), yc = parts.reduce((s2, q) => s2 + q[0] * q[1] * q[2], 0) / As;
+    const Ist = two ? z.ts * Math.pow(2 * z.bs + tw, 3) / 12 + 2 * lw * Math.pow(tw, 3) / 12 : parts.reduce((s2, q) => s2 + q[1] * Math.pow(q[0], 3) / 12 + q[0] * q[1] * Math.pow(q[2] - yc, 2), 0);
+    // sąsiednie panele
+    const adj = panels.filter(q => Math.abs(q.x0 - z.x) < 21 || Math.abs(q.x1 - z.x) < 21);
+    const aMin = Math.min(...adj.map(q => q.a).filter(isFinite), Infinity);
+    const reqI = !isFinite(aMin) ? 0.75 * hw * tw ** 3 : (aMin / hw < Math.SQRT2 ? 1.5 * hw ** 3 * tw ** 3 / (aMin * aMin) : 0.75 * hw * tw ** 3);
+    out.checks.push(BS.check({ id: `${id}-I`, grp, n: `${nm}: sztywność (żebro sztywne)`, ref: 'PN-EN 1993-1-5, 9.3.3(3)', Ed: reqI, Rd: Ist, unit: 'I', util: reqI / Ist, x: z.x, d: { Ist, reqI, aMin }, f: `I_st = ${U.fmt(Ist / 1e4, 1)} cm⁴ ≥ ${isFinite(aMin) && aMin / hw < Math.SQRT2 ? '1,5·h_w³·t³/a²' : '0,75·h_w·t³'} = ${U.fmt(reqI / 1e4, 1)} cm⁴ (a = ${isFinite(aMin) ? U.fmt(aMin, 0) + ' mm' : '∞'})` }));
+    // skręcenie żebra płaskiego (9.2.1(8)): I_T/I_p ≥ 5,3·f_y/E → b_s/t_s ≤ √(E/(5,3·f_y))
+    const lim = Math.sqrt(E / (5.3 * fy));
+    out.checks.push(BS.check({ id: `${id}-T`, grp, n: `${nm}: wyboczenie skrętne (b_s/t_s)`, ref: 'PN-EN 1993-1-5, 9.2.1(8)', Ed: z.bs / z.ts, Rd: lim, unit: '-', util: (z.bs / z.ts) / lim, x: z.x, f: `b_s/t_s = ${U.fmt(z.bs / z.ts, 2)} ≤ √(E/(5,3·f_y)) = ${U.fmt(lim, 2)}` }));
+    // siła w żebrze: N_st = V_Ed − f_yw·h_w·t/(√3·γM1·λ̄_w²) (9.13) + siła skupiona w miejscu żebra
+    let k = 0; for (let i = 0; i < xs.length; i++) if (Math.abs(xs[i] - z.x) < Math.abs(xs[k] - z.x)) k = i;
+    const VEd = Math.max(...env.map(e => Math.max(Math.abs(e.Vmax[k]), Math.abs(e.Vmin[k]))));
+    const pn = adj.length ? adj.reduce((m2, q) => (q.sb.lw > m2.sb.lw ? q : m2)) : panels[0];
+    const Nst = Math.max(0, pn.sb.need && isFinite(pn.a) ? VEd - fy * hw * tw / (Math.sqrt(3) * g1 * pn.sb.lw * pn.sb.lw) : 0) + (z.F || 0);
+    const i2 = Math.sqrt(Ist / As), lam = 0.75 * hw / (i2 * 93.9 * eps), ph = 0.5 * (1 + 0.49 * (lam - 0.2) + lam * lam), chi = Math.min(1, 1 / (ph + Math.sqrt(ph * ph - lam * lam)));
+    const NbRd = chi * As * fy / g1;
+    out.checks.push(BS.check({ id: `${id}-N`, grp, n: `${nm}: wyboczenie żebra (${z.F ? 'siła skupiona + ' : ''}siła od pola ścinania)`, ref: 'PN-EN 1993-1-5, 9.3.3(3), 9.4', Ed: Nst, Rd: NbRd, unit: 'F', util: Nst / NbRd, x: z.x, d: { As, Ist, lam, chi, Nst, VEd, F: z.F || 0 }, f: `N_st = ${z.F ? `F = ${U.fmt(z.F / 1e3, 1)} kN + ` : ''}max(0; V_Ed − f_yw·h_w·t/(√3·γM1·λ̄_w²)) = ${U.fmt(Nst / 1e3, 1)} kN; A_s = ${U.fmt(As, 0)} mm², l = 0,75·h_w, λ̄ = ${U.fmt(lam, 3)}, χ (krzywa c) = ${U.fmt(chi, 3)}` }));
+    if (z.F) {
+      const Fb = 2 * Math.max(0, z.bs - 15) * z.ts * (two ? 1 : 0.5) * fy / ndp.gM0;
+      out.checks.push(BS.check({ id: `${id}-D`, grp, n: `${nm}: docisk żebra pod siłą skupioną`, ref: 'PN-EN 1993-1-1, 6.2.4', Ed: z.F, Rd: Fb, unit: 'F', util: z.F / Fb, x: z.x }));
+    }
+  });
+};
 /* ---------------------------------------------------------- połączenia (BS.W) – siły, sprawdzenia, rejestr */
 J.jointForces = function (w, info) {
   const Vser = (info.Rk || []).reduce((s2, q) => s2 + Math.max(0, q.R), 0);
@@ -642,7 +725,7 @@ J.dobierzWezly = function (st0, r, eta) {
       }
       if (sec.kind === 'I' || sec.kind === 'U' || sec.kind === 'RHS') {
         const isEnd = (p.idx === 0 && U.num(st.geom.wspL) === 0) || (p.idx === r.md.sup.length - 1 && U.num(st.geom.wspP) === 0);
-        const pr = R.patch(sec, base, ndp, { F: R0, ss: U.num(sp.ss, 0), typ: isEnd ? 'c' : 'a', c: U.num(sp.c, 0), pas: 'd', a: U.num(st.analiza.zebraRozstaw) * 1000 });
+        const pr = R.patch(sec, base, ndp, { F: R0, ss: U.num(sp.ss, 0), typ: isEnd ? 'c' : 'a', c: U.num(sp.c, 0), pas: 'd', a: 0 });
         if (pr.u > eta && (sec.kind === 'I' || sec.kind === 'U')) {
           const bsMax = Math.floor(((sec.kind === 'U' ? sec.b - sec.tw : (Math.min(sec.bg, sec.bd) - sec.tw) / 2) - 5) / 5) * 5;
           let ok = false;

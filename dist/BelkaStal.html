@@ -804,6 +804,13 @@ svg.elev .xend { cursor: ew-resize; } svg.elev .xend circle { stroke-width: 1.4;
 .jdes .roval small { color: var(--ink3); }
 table.ctab td.tk input[disabled] { opacity: 1; }
 table.ctab td.tk input[data-tick] { accent-color: var(--ok); cursor: default; }
+/* ---------- widok 3D ---------- */
+.v3box { margin-bottom: 12px; }
+.v3bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 2px 0 8px; }
+.v3wrap { position: relative; }
+.v3cv { display: block; width: 100%; height: min(520px, 62vh); min-height: 300px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); cursor: grab; touch-action: none; }
+.v3cv:active { cursor: grabbing; }
+.v3tip { position: absolute; pointer-events: none; max-width: 300px; padding: 4px 8px; border-radius: 5px; background: var(--toastbg); color: var(--toastink); font-size: 12px; line-height: 1.35; box-shadow: var(--shadow); z-index: 3; }
 </style>
 </head>
 <body>
@@ -2859,8 +2866,9 @@ R.stiffener = function (sec, b, ndp, o) {
   const lw = 15 * eps * tw;
   const left = o.koniec ? Math.min(lw, Math.max(0, o.e || 0)) : lw;
   const right = lw;
-  const As = 2 * bs * ts + (left + right + ts) * tw;
-  const Is = ts * Math.pow(2 * bs + tw, 3) / 12 + (left + right) * Math.pow(tw, 3) / 12;
+  const nS = o.jedno ? 1 : 2;
+  const As = nS * bs * ts + (left + right + ts) * tw;
+  const Is = o.jedno ? ts * Math.pow(bs, 3) / 3 + (left + right) * Math.pow(tw, 3) / 12 : ts * Math.pow(2 * bs + tw, 3) / 12 + (left + right) * Math.pow(tw, 3) / 12;
   const i = Math.sqrt(Is / As);
   const Lcr = (o.pasyUstalone === false ? 1.0 : 0.75) * hw;
   const lam1 = 93.9 * eps, lam = Lcr / (i * lam1);
@@ -2868,7 +2876,7 @@ R.stiffener = function (sec, b, ndp, o) {
   const ph = 0.5 * (1 + al * (lam - 0.2) + lam * lam);
   const chi = Math.min(1, 1 / (ph + Math.sqrt(ph * ph - lam * lam)));
   const NbRd = chi * As * fy / ndp.gM1;
-  const Acont = 2 * Math.max(0, bs - (o.ch || 0)) * ts;
+  const Acont = nS * Math.max(0, bs - (o.ch || 0)) * ts;
   const Fbear = Acont * fy / ndp.gM0;
   // wymagana sztywność/smukłość ścianek żebra (pas wspornikowy kl. 3: bs/ts ≤ 14ε)
   const ctS = bs / ts, ctLim = 14 * eps;
@@ -4206,7 +4214,8 @@ J.defaultState = function () {
     ],
     stezenia: [{ x: 3.0, typ: 'boczne', wys: 'pas_g', odEtapu: 0, bocznieY: true }],
     stezenieCiagle: { pasG: true, odEtapu: 1, pasD: false, odEtapuD: 1 },
-    analiza: { muY: 1.0, muZ: 1.0, zebraRozstaw: 0, slupekSztywny: false },
+    analiza: { muY: 1.0, muZ: 1.0, zebraRozstaw: 0, zebraBs: '', zebraTs: '', zebraPodpory: true, slupekSztywny: false },
+    zebraSrodnika: [],
     sgu: { typ: 'strop', wmax: 250, w3: 350, podniesienie: 'brak', wc: 0, drgania: true, fmin: 3.0, uLim: 200 },
     pozar: { aktywny: false, R: 60, ekspozycja: '3', ochrona: 'brak', dp: 20, lp: 0.12, cp: 1200, rp: 300, kappa1: '' },
     zmeczenie: { aktywny: false, przypadki: [], n: 2e6, phi: 1.0, zmiennyZnak: false, ocena: 'tolerancja', skutki: 'duze', detale: [{ k: 'w160', miejsce: 'pas_d', dc: 160 }], dtc: 100 },
@@ -4228,7 +4237,7 @@ J.normalize = function (st) {
   const nS = (o.geom.przesla || []).length + 1;
   o.podpory = (o.podpory || []).slice(0, nS);
   while (o.podpory.length < nS) o.podpory.push({ typ: 'przegub', ltb: 'widelkowe', ss: 100, c: 0, wezel: { typ: 'brak' } });
-  ['obciazenia', 'etapy', 'stezenia', 'podporyTymczasowe', 'styki'].forEach(k => { if (!Array.isArray(o[k])) o[k] = []; });
+  ['obciazenia', 'etapy', 'stezenia', 'podporyTymczasowe', 'styki', 'zebraSrodnika'].forEach(k => { if (!Array.isArray(o[k])) o[k] = []; });
   if (!o.etapy.length) o.etapy = [{ id: 'E1', nazwa: 'Eksploatacja', typ: 'eksploatacja', opis: '' }];
   if (/^c[234]$/.test(o.schemat)) o.schemat = 'ciagla';
   o.format = BS.FORMAT;
@@ -4280,7 +4289,11 @@ J.run = function (st0, opt) {
   const combos = gk.list; out.combos = combos;
   const finalS = md.nE - 1;
   const ns = an.ns, xs = an.xs;
-  const sb = R.shearBuckling(sec, base, ndp, { a: U.num(st.analiza.zebraRozstaw) * 1000, sztywny: !!st.analiza.slupekSztywny });
+  // żebra poprzeczne środnika i panele (PN-EN 1993-1-5, 5): granice paneli – żebra pośrednie i podpory z żebrami
+  const zebra = J.webStiff(st, md, sec); out.zebra = zebra;
+  const panels = J.panels(st, md, sec, base, ndp, zebra); out.panels = panels;
+  const sbPts = Array.from(xs, x => { const q = panels.find(pn => x >= pn.x0 - 1e-6 && x <= pn.x1 + 1e-6); return q ? q.sb : panels[0].sb; });
+  const sb = panels.reduce((m2, q) => (!m2 || q.sb.Vb < m2.Vb ? q.sb : m2), null);
   out.sb = sb;
   (sec.uwagi || []).forEach(u => out.info.push(u));
   const reg = {}; // najbardziej wytężone wystąpienie każdego sprawdzenia
@@ -4325,11 +4338,12 @@ J.run = function (st0, opt) {
       if (better(kp.V, p.uV)) rec(kp.V, { util: p.uV, V: E.V[i], M: E.M[i], p, x: xs[i], combo: c, etap: c.etap });
       if (E.Vy[i] !== 0 && better(kp.Vy, p.uVy)) rec(kp.Vy, { util: p.uVy, V: E.Vy[i], p, x: xs[i], combo: c, etap: c.etap });
       if (Math.abs(E.N) > 1 && better(kp.N, p.uN)) rec(kp.N, { util: p.uN, N: E.N, p, x: xs[i], combo: c, etap: c.etap });
-      if (sb.need) {
-        const ub = Math.abs(E.V[i]) / sb.Vb;
-        if (better(kp.Vb, ub)) rec(kp.Vb, { util: ub, V: E.V[i], x: xs[i], combo: c, etap: c.etap });
-        const im = R.interMV(base, sb, E.M[i], E.V[i]);
-        if (better(kp.MV, im.u)) rec(kp.MV, { util: im.u, im, M: E.M[i], V: E.V[i], x: xs[i], combo: c, etap: c.etap });
+      const sbi = sbPts[i];
+      if (sbi.need) {
+        const ub = Math.abs(E.V[i]) / sbi.Vb;
+        if (better(kp.Vb, ub)) rec(kp.Vb, { util: ub, V: E.V[i], x: xs[i], combo: c, etap: c.etap, sb: sbi });
+        const im = R.interMV(base, sbi, E.M[i], E.V[i]);
+        if (better(kp.MV, im.u)) rec(kp.MV, { util: im.u, im, M: E.M[i], V: E.V[i], x: xs[i], combo: c, etap: c.etap, sb: sbi });
       }
     }
     // kandydaci do zwichrzenia: max |M| w segmentach
@@ -4362,20 +4376,24 @@ J.run = function (st0, opt) {
     if (vy && vy.util > 1e-6) out.checks.push(BS.check({ id: `${s}-Vy`, grp: g, etap: s, n: 'Ścinanie Vy (pasy)', ref: '6.2.6', Ed: Math.abs(vy.V), Rd: base.Vplz_y, unit: 'F', util: vy.util, x: vy.x, combo: fmtCombo(vy.combo), d: vy }));
     const nn = reg[`${s}|N`];
     if (nn && nn.util > 1e-6) out.checks.push(BS.check({ id: `${s}-N`, grp: g, etap: s, n: nn.N > 0 ? 'Rozciąganie' : 'Ściskanie (nośność przekroju)', ref: nn.N > 0 ? '6.2.3' : '6.2.4', Ed: Math.abs(nn.N), Rd: nn.N > 0 ? base.Npl : base.Nc, unit: 'F', util: nn.util, x: nn.x, combo: fmtCombo(nn.combo), d: nn }));
-    if (sb.need) {
-      const b = reg[`${s}|Vb`]; if (b) out.checks.push(BS.check({ id: `${s}-Vb`, grp: `PN-EN 1993-1-5 – środnik${stName(s)}`, etap: s, n: 'Wyboczenie przy ścinaniu', ref: 'PN-EN 1993-1-5, 5.2', Ed: Math.abs(b.V), Rd: sb.Vb, unit: 'F', util: b.util, x: b.x, combo: fmtCombo(b.combo), d: b }));
+    if (panels.some(q => q.sb.need)) {
+      const b = reg[`${s}|Vb`]; if (b) out.checks.push(BS.check({ id: `${s}-Vb`, grp: `PN-EN 1993-1-5 – środnik${stName(s)}`, etap: s, n: `Wyboczenie przy ścinaniu (panel a = ${b.sb.a === Infinity ? '∞' : U.fmt(b.sb.a / 1000, 2) + ' m'})`, ref: 'PN-EN 1993-1-5, 5.2', Ed: Math.abs(b.V), Rd: b.sb.Vb, unit: 'F', util: b.util, x: b.x, combo: fmtCombo(b.combo), d: b }));
       const i7 = reg[`${s}|MV71`]; if (i7) out.checks.push(BS.check({ id: `${s}-MV`, grp: `PN-EN 1993-1-5 – środnik${stName(s)}`, etap: s, n: 'Interakcja M–V (wyboczenie przy ścinaniu)', ref: 'PN-EN 1993-1-5, 7.1', Ed: i7.util, Rd: 1, unit: '-', util: i7.util, x: i7.x, combo: fmtCombo(i7.combo), d: i7 }));
     }
   }
-  if (!sb.need) out.info.push(`Środnik: hw/tw = ${U.fmt(sb.ht, 1)} ≤ ${U.fmt(sb.limit, 1)} – sprawdzenie wyboczenia przy ścinaniu nie jest wymagane (PN-EN 1993-1-5, 5.1(2)).`);
+  if (!panels.some(q => q.sb.need)) out.info.push(`Środnik: hw/tw = ${U.fmt(sb.ht, 1)} ≤ ${U.fmt(sb.limit, 1)} – sprawdzenie wyboczenia przy ścinaniu nie jest wymagane (PN-EN 1993-1-5, 5.1(2)).`);
   // --- siły skupione na środnik (poza podporami)
   ptLoads.forEach((pl, k) => {
     const r = ptRes[k]; if (!r || r.F <= 0) return;
-    const pr = R.patch(sec, base, ndp, { F: r.F, ss: pl.ss, typ: 'a', pas: pl.wys === 'pas_d' ? 'd' : 'g', a: U.num(st.analiza.zebraRozstaw) * 1000 });
+    const zs = zebra.find(z => Math.abs(z.x - pl.x) <= Math.max(30, U.num(pl.ss) / 2)); if (zs) { zs.F = Math.max(zs.F || 0, r.F); return; }
+    const pnl = panels.find(q => pl.x >= q.x0 - 1e-6 && pl.x <= q.x1 + 1e-6);
+    const pr = R.patch(sec, base, ndp, { F: r.F, ss: pl.ss, typ: 'a', pas: pl.wys === 'pas_d' ? 'd' : 'g', a: pnl && isFinite(pnl.a) ? pnl.a : 0 });
     const e1 = Math.abs(r.M) / (Math.min(sec.Wel_t, sec.Wel_b) * base.fy / ndp.gM0);
     out.checks.push(BS.check({ id: `pt${k}`, grp: `PN-EN 1993-1-5 – środnik${stName(pl.etap)}`, etap: pl.etap, n: `Siła skupiona na środnik (x = ${U.fmt(pl.x / 1000, 2)} m)`, ref: 'PN-EN 1993-1-5, 6.2', Ed: r.F, Rd: pr.FRd, unit: 'F', util: pr.u, x: pl.x, combo: fmtCombo(r.combo), d: pr }));
     out.checks.push(BS.check({ id: `pt${k}i`, grp: `PN-EN 1993-1-5 – środnik${stName(pl.etap)}`, etap: pl.etap, n: `Interakcja F–M (x = ${U.fmt(pl.x / 1000, 2)} m)`, ref: 'PN-EN 1993-1-5, 7.2', Ed: pr.u + 0.8 * e1, Rd: 1.4, unit: '-', util: (pr.u + 0.8 * e1) / 1.4, x: pl.x, combo: fmtCombo(r.combo), d: { eta1: e1, eta2: pr.u } }));
   });
+  // --- żebra poprzeczne środnika (PN-EN 1993-1-5, 9.1–9.4)
+  J.stiffChecks(st, md, sec, base, ndp, zebra, panels, env, xs, out);
   // --- zwichrzenie i interakcja (każdy etap)
   out.ltb = [];
   for (let s = 0; s < md.nE; s++) {
@@ -4539,14 +4557,17 @@ J.supports = function (st, md, an, combos, sec, base, mat, ndp, env, out) {
     if (conn && w.typ !== 'spawane' && !(sec.kind === 'I' || sec.kind === 'U')) { out.errors.push(`Podpora ${p.id}: połączenie śrubowe przez środnik (blacha czołowa / żebrowa / kątowniki) jest obsługiwane dla dwuteowników i ceowników – dla ${sec.kind === 'RHS' ? 'rur' : 'kątowników'} wybierz połączenie spawane lub oparcie.`); conn = false; }
     // docisk środnika / żebro
     if (!conn && Rmax > 0 && sec.kind !== 'L') {
-      if (w.zebro && (sec.kind === 'I' || sec.kind === 'U')) {
-        const sr = R.stiffener(sec, base, ndp, { F: Rmax, bs: U.num(w.bs, 80), ts: U.num(w.ts, 10), ch: U.num(w.ch, 15), koniec: isEnd, e: U.num(p.src && p.src.c, 0) + U.num(p.ss) / 2 });
+      const zSup = (out.zebra || []).find(z => Math.abs(z.x - p.x) <= 30);
+      if ((w.zebro || zSup) && (sec.kind === 'I' || sec.kind === 'U')) {
+        const sr = R.stiffener(sec, base, ndp, { F: Rmax, bs: w.zebro ? U.num(w.bs, 80) : zSup.bs, ts: w.zebro ? U.num(w.ts, 10) : zSup.ts, ch: U.num(w.ch, 15), koniec: isEnd, e: U.num(p.src && p.src.c, 0) + U.num(p.ss) / 2, jedno: !w.zebro && zSup.strona === 'jedna' });
+        if (zSup) zSup.podpora = p.id;
         r.zebro = sr;
         r.checks.push(BS.check({ id: `${p.id}-ZB`, grp, n: 'Żebro podporowe – wyboczenie (przekrój krzyżowy z 15εtw)', ref: 'PN-EN 1993-1-5 9.4; PN-EN 1993-1-1 6.3.1', Ed: Rmax, Rd: sr.NbRd, unit: 'F', util: sr.uB, x: p.x, combo: cMax !== null ? combos[cMax].opis : '', d: sr }));
         r.checks.push(BS.check({ id: `${p.id}-ZD`, grp, n: 'Żebro podporowe – docisk końców żeber', ref: 'PN-EN 1993-1-1 6.2.4', Ed: Rmax, Rd: sr.Fbear, unit: 'F', util: sr.uC, x: p.x, combo: '', d: sr }));
         if (sr.ctS > sr.ctLim) r.checks.push(BS.check({ id: `${p.id}-ZC`, grp, n: 'Żebro – smukłość ścianki bs/ts', ref: 'PN-EN 1993-1-5 9.2.1(8)', Ed: sr.ctS, Rd: sr.ctLim, unit: '-', util: sr.ctS / sr.ctLim, d: sr }));
       } else {
-        const pr = R.patch(sec, base, ndp, { F: Rmax, ss: U.num(p.ss, 0), typ: isEnd ? 'c' : 'a', c: U.num(p.src && p.src.c, 0), pas: 'd', a: U.num(st.analiza.zebraRozstaw) * 1000 });
+        const pnl = (out.panels || []).find(q => p.x >= q.x0 - 1e-6 && p.x <= q.x1 + 1e-6);
+        const pr = R.patch(sec, base, ndp, { F: Rmax, ss: U.num(p.ss, 0), typ: isEnd ? 'c' : 'a', c: U.num(p.src && p.src.c, 0), pas: 'd', a: pnl && isFinite(pnl.a) ? pnl.a : 0 });
         r.patch = pr;
         r.checks.push(BS.check({ id: `${p.id}-PL`, grp, n: `Docisk środnika nad podporą (typ ${isEnd ? 'c' : 'a'})`, ref: 'PN-EN 1993-1-5 6.2–6.5', Ed: Rmax, Rd: pr.FRd, unit: 'F', util: pr.u, x: p.x, combo: cMax !== null ? combos[cMax].opis : '', d: pr }));
         if (!isEnd && Mmax > 0) {
@@ -4572,6 +4593,76 @@ J.supports = function (st, md, an, combos, sec, base, mat, ndp, env, out) {
 };
 
 
+
+/* ---------------------------------------------------------- żebra poprzeczne środnika */
+// lista żeber: zadane w punktach (st.zebraSrodnika) + rozmieszczone co a w przęsłach (st.analiza.zebraRozstaw)
+J.stiffAuto = function (sec) {
+  const tw = sec.tw || 6, bf = sec.kind === 'U' ? sec.b : Math.min(sec.bg || 100, sec.bd || 100);
+  const bs = Math.max(30, Math.floor((sec.kind === 'U' ? bf - tw - 5 : (bf - tw) / 2 - 5) / 5) * 5);
+  const ts = Math.max(6, Math.ceil(Math.max(tw, bs / Math.sqrt(U.E / (5.3 * 355))) / 2) * 2);
+  return { bs, ts };
+};
+J.webStiff = function (st, md, sec) {
+  if (!(sec.kind === 'I' || sec.kind === 'U')) return [];
+  const au = J.stiffAuto(sec), out = [];
+  (st.zebraSrodnika || []).forEach((z, j) => { const x = U.num(z.x) * 1000; if (x < -1 || x > md.L + 1) return; out.push({ src: j, x: U.clamp(x, 0, md.L), strona: sec.kind === 'U' ? 'jedna' : (z.strona === 'jedna' ? 'jedna' : 'obie'), bs: U.num(z.bs, au.bs) || au.bs, ts: U.num(z.ts, au.ts) || au.ts }); });
+  const a = U.num((st.analiza || {}).zebraRozstaw) * 1000;
+  if (a > 0) {
+    const xs = md.sup.map(p => p.x).sort((p, q) => p - q), bs = U.num(st.analiza.zebraBs, au.bs) || au.bs, ts = U.num(st.analiza.zebraTs, au.ts) || au.ts;
+    const atSup = st.analiza.zebraPodpory !== false;
+    for (let i = 0; i < xs.length - 1; i++) { const L = xs[i + 1] - xs[i], n = Math.ceil(L / a - 1e-9); for (let k = atSup ? 0 : 1; k <= (atSup ? n : n - 1); k++) { const x = xs[i] + L * k / n; if (!out.some(z => Math.abs(z.x - x) < 20)) out.push({ src: 'g', x, strona: sec.kind === 'U' ? 'jedna' : 'obie', bs, ts }); } }
+  }
+  return out.sort((p, q) => p.x - q.x);
+};
+// panele środnika: granice – żebra pośrednie i podpory z żebrami podporowymi; poza nimi a = ∞
+J.panels = function (st, md, sec, base, ndp, zebra) {
+  const B = zebra.map(z => z.x);
+  md.sup.forEach((p, i) => { const w = (st.podpory[i] || {}).wezel || {}; if (w.zebro && !B.some(x => Math.abs(x - p.x) < 20)) B.push(p.x); });
+  B.sort((p, q) => p - q);
+  const cuts = [0].concat(B.filter(x => x > 1 && x < md.L - 1)).concat([md.L]).filter((v, i, a) => i === 0 || v - a[i - 1] > 1);
+  const out = [];
+  for (let i = 0; i < cuts.length - 1; i++) {
+    const x0 = cuts[i], x1 = cuts[i + 1], bounded = B.some(x => Math.abs(x - x0) < 21) && B.some(x => Math.abs(x - x1) < 21);
+    const a = bounded ? x1 - x0 : Infinity;
+    out.push({ x0, x1, a, sb: R.shearBuckling(sec, base, ndp, { a, sztywny: !!st.analiza.slupekSztywny }) });
+  }
+  return out;
+};
+// sprawdzenia żeber pośrednich (9.3.3, 9.2.1(8), 9.4) i żeber pod siłami skupionymi
+J.stiffChecks = function (st, md, sec, base, ndp, zebra, panels, env, xs, out) {
+  if (!zebra.length) return;
+  const fy = base.fy, eps = base.eps, tw = sec.tw, hw = sec.hw, E = U.E, g1 = ndp.gM1;
+  const grp = 'PN-EN 1993-1-5 – żebra poprzeczne środnika';
+  zebra.forEach((z, j) => {
+    if (md.sup.some(p => Math.abs(p.x - z.x) <= 30)) return;          // żebro podporowe – sprawdzane w podporze
+    const id = `ZS${j + 1}`, nm = `Żebro x = ${U.fmt(z.x / 1000, 2)} m (${z.strona === 'jedna' ? 'jednostronne' : 'obustronne'} ${U.fmt(z.bs, 0)}×${U.fmt(z.ts, 0)})`;
+    // przekrój współpracujący: żebro + 2 × 15εt_w środnika (9.1(2))
+    const lw = 15 * eps * tw, two = z.strona !== 'jedna';
+    const parts = two ? [[2 * z.bs + tw, z.ts, 0], [2 * lw, tw, 0]] : [[z.bs, z.ts, tw / 2 + z.bs / 2], [2 * lw + z.ts, tw, 0]];
+    const As = parts.reduce((s2, q) => s2 + q[0] * q[1], 0), yc = parts.reduce((s2, q) => s2 + q[0] * q[1] * q[2], 0) / As;
+    const Ist = two ? z.ts * Math.pow(2 * z.bs + tw, 3) / 12 + 2 * lw * Math.pow(tw, 3) / 12 : parts.reduce((s2, q) => s2 + q[1] * Math.pow(q[0], 3) / 12 + q[0] * q[1] * Math.pow(q[2] - yc, 2), 0);
+    // sąsiednie panele
+    const adj = panels.filter(q => Math.abs(q.x0 - z.x) < 21 || Math.abs(q.x1 - z.x) < 21);
+    const aMin = Math.min(...adj.map(q => q.a).filter(isFinite), Infinity);
+    const reqI = !isFinite(aMin) ? 0.75 * hw * tw ** 3 : (aMin / hw < Math.SQRT2 ? 1.5 * hw ** 3 * tw ** 3 / (aMin * aMin) : 0.75 * hw * tw ** 3);
+    out.checks.push(BS.check({ id: `${id}-I`, grp, n: `${nm}: sztywność (żebro sztywne)`, ref: 'PN-EN 1993-1-5, 9.3.3(3)', Ed: reqI, Rd: Ist, unit: 'I', util: reqI / Ist, x: z.x, d: { Ist, reqI, aMin }, f: `I_st = ${U.fmt(Ist / 1e4, 1)} cm⁴ ≥ ${isFinite(aMin) && aMin / hw < Math.SQRT2 ? '1,5·h_w³·t³/a²' : '0,75·h_w·t³'} = ${U.fmt(reqI / 1e4, 1)} cm⁴ (a = ${isFinite(aMin) ? U.fmt(aMin, 0) + ' mm' : '∞'})` }));
+    // skręcenie żebra płaskiego (9.2.1(8)): I_T/I_p ≥ 5,3·f_y/E → b_s/t_s ≤ √(E/(5,3·f_y))
+    const lim = Math.sqrt(E / (5.3 * fy));
+    out.checks.push(BS.check({ id: `${id}-T`, grp, n: `${nm}: wyboczenie skrętne (b_s/t_s)`, ref: 'PN-EN 1993-1-5, 9.2.1(8)', Ed: z.bs / z.ts, Rd: lim, unit: '-', util: (z.bs / z.ts) / lim, x: z.x, f: `b_s/t_s = ${U.fmt(z.bs / z.ts, 2)} ≤ √(E/(5,3·f_y)) = ${U.fmt(lim, 2)}` }));
+    // siła w żebrze: N_st = V_Ed − f_yw·h_w·t/(√3·γM1·λ̄_w²) (9.13) + siła skupiona w miejscu żebra
+    let k = 0; for (let i = 0; i < xs.length; i++) if (Math.abs(xs[i] - z.x) < Math.abs(xs[k] - z.x)) k = i;
+    const VEd = Math.max(...env.map(e => Math.max(Math.abs(e.Vmax[k]), Math.abs(e.Vmin[k]))));
+    const pn = adj.length ? adj.reduce((m2, q) => (q.sb.lw > m2.sb.lw ? q : m2)) : panels[0];
+    const Nst = Math.max(0, pn.sb.need && isFinite(pn.a) ? VEd - fy * hw * tw / (Math.sqrt(3) * g1 * pn.sb.lw * pn.sb.lw) : 0) + (z.F || 0);
+    const i2 = Math.sqrt(Ist / As), lam = 0.75 * hw / (i2 * 93.9 * eps), ph = 0.5 * (1 + 0.49 * (lam - 0.2) + lam * lam), chi = Math.min(1, 1 / (ph + Math.sqrt(ph * ph - lam * lam)));
+    const NbRd = chi * As * fy / g1;
+    out.checks.push(BS.check({ id: `${id}-N`, grp, n: `${nm}: wyboczenie żebra (${z.F ? 'siła skupiona + ' : ''}siła od pola ścinania)`, ref: 'PN-EN 1993-1-5, 9.3.3(3), 9.4', Ed: Nst, Rd: NbRd, unit: 'F', util: Nst / NbRd, x: z.x, d: { As, Ist, lam, chi, Nst, VEd, F: z.F || 0 }, f: `N_st = ${z.F ? `F = ${U.fmt(z.F / 1e3, 1)} kN + ` : ''}max(0; V_Ed − f_yw·h_w·t/(√3·γM1·λ̄_w²)) = ${U.fmt(Nst / 1e3, 1)} kN; A_s = ${U.fmt(As, 0)} mm², l = 0,75·h_w, λ̄ = ${U.fmt(lam, 3)}, χ (krzywa c) = ${U.fmt(chi, 3)}` }));
+    if (z.F) {
+      const Fb = 2 * Math.max(0, z.bs - 15) * z.ts * (two ? 1 : 0.5) * fy / ndp.gM0;
+      out.checks.push(BS.check({ id: `${id}-D`, grp, n: `${nm}: docisk żebra pod siłą skupioną`, ref: 'PN-EN 1993-1-1, 6.2.4', Ed: z.F, Rd: Fb, unit: 'F', util: z.F / Fb, x: z.x }));
+    }
+  });
+};
 /* ---------------------------------------------------------- połączenia (BS.W) – siły, sprawdzenia, rejestr */
 J.jointForces = function (w, info) {
   const Vser = (info.Rk || []).reduce((s2, q) => s2 + Math.max(0, q.R), 0);
@@ -4813,7 +4904,7 @@ J.dobierzWezly = function (st0, r, eta) {
       }
       if (sec.kind === 'I' || sec.kind === 'U' || sec.kind === 'RHS') {
         const isEnd = (p.idx === 0 && U.num(st.geom.wspL) === 0) || (p.idx === r.md.sup.length - 1 && U.num(st.geom.wspP) === 0);
-        const pr = R.patch(sec, base, ndp, { F: R0, ss: U.num(sp.ss, 0), typ: isEnd ? 'c' : 'a', c: U.num(sp.c, 0), pas: 'd', a: U.num(st.analiza.zebraRozstaw) * 1000 });
+        const pr = R.patch(sec, base, ndp, { F: R0, ss: U.num(sp.ss, 0), typ: isEnd ? 'c' : 'a', c: U.num(sp.c, 0), pas: 'd', a: 0 });
         if (pr.u > eta && (sec.kind === 'I' || sec.kind === 'U')) {
           const bsMax = Math.floor(((sec.kind === 'U' ? sec.b - sec.tw : (Math.min(sec.bg, sec.bd) - sec.tw) / 2) - 5) / 5) * 5;
           let ok = false;
@@ -5178,6 +5269,8 @@ D.scheme = function (S, R, o) {
     const act = z.od <= s, x = X(z.x), yy = z.wys === 'pas_d' ? yBeam + 6 : z.wys === 'srodek' ? yBeam : yBeam - 6, col = act ? '#1d5bb8' : '#9aa3b0';
     g += `<g class="${o.edit ? 'rst' : ''}" data-rst="${z.src}" opacity="${act ? 1 : 0.45}"><title>Stężenie ${z.typ} x = ${fmt(z.x / 1000, 2)} m (od etapu ${z.od + 1})</title><circle cx="${x}" cy="${yy}" r="6" fill="#ffffff" fill-opacity="0"/><circle cx="${x}" cy="${yy}" r="4.2" fill="#ffffff" stroke="${col}" stroke-width="1.6"/>${z.typ !== 'boczne' ? `<line x1="${x - 3}" y1="${yy - 3}" x2="${x + 3}" y2="${yy + 3}" stroke="${col}" stroke-width="1.4"/><line x1="${x - 3}" y1="${yy + 3}" x2="${x + 3}" y2="${yy - 3}" stroke="${col}" stroke-width="1.4"/>` : `<circle cx="${x}" cy="${yy}" r="1.4" fill="${col}"/>`}</g>`;
   });
+  // żebra poprzeczne środnika
+  (R.zebra || []).forEach(z => { const x = X(z.x); g += `<g class="${o.edit ? 'stf' : ''}" data-stf="${z.src}"${o.edit ? ' style="cursor:pointer"' : ''}><title>Żebro środnika x = ${fmt(z.x / 1000, 2)} m (${z.strona === 'jedna' ? 'jednostronne' : 'obustronne'} ${fmt(z.bs, 0)}×${fmt(z.ts, 0)} mm)</title><rect x="${x - 4}" y="${yBeam - 10}" width="8" height="20" fill="#ffffff" fill-opacity="0"/><line x1="${x}" y1="${yBeam - 7}" x2="${x}" y2="${yBeam + 7}" stroke="#b5651d" stroke-width="2"/></g>`; });
   // styki montażowe
   (S.styki || []).forEach((st2, j) => { const x = X(U.clamp(U.num(st2.x) * 1000, 0, L)); g += `<g class="${o.edit ? 'sty' : ''}" data-sty="${j}"${o.edit ? ' style="cursor:pointer"' : ''}><title>Styk montażowy S${j + 1} – x = ${fmt(U.num(st2.x), 2)} m</title><rect x="${x - 7}" y="${yBeam - 14}" width="14" height="28" fill="#ffffff" fill-opacity="0"/><line x1="${x - 2.5}" y1="${yBeam - 9}" x2="${x - 2.5}" y2="${yBeam + 9}" stroke="#b5651d" stroke-width="1.6"/><line x1="${x + 2.5}" y1="${yBeam - 9}" x2="${x + 2.5}" y2="${yBeam + 9}" stroke="#b5651d" stroke-width="1.6"/>${tx(x, yBeam - 12, 'S' + (j + 1), { fs: 9, w: 700, c: '#b5651d' })}</g>`; });
   // opis przekroju
@@ -5489,8 +5582,7 @@ D.elevation = function (S, R, o) {
   (md.stez || []).forEach(z => { const x = X(z.x); g += `<g class="rst" data-rst="${z.src}" style="cursor:pointer"><title>Stężenie ${z.typ} x = ${fmt(z.x / 1000, 2)} m</title><path d="M ${x - 6} ${yt - 14} L ${x + 6} ${yt - 14} L ${x} ${yt - 2} Z" fill="#1d5bb8"/><line x1="${x}" y1="${yt - 30}" x2="${x}" y2="${yt - 14}" stroke="#1d5bb8"/></g>`; });
   if ((md.ciagle || {}).pasG) g += `<line x1="${X(0)}" y1="${yt - 5}" x2="${X(L)}" y2="${yt - 5}" stroke="#1d5bb8" stroke-width="2" stroke-dasharray="3 3"/>`;
   // żebra pośrednie
-  const a = U.num((S.analiza || {}).zebraRozstaw) * 1000;
-  if (a > 0) for (let x = a; x < L - 1; x += a) g += `<line x1="${X(x)}" y1="${yt + tf}" x2="${X(x)}" y2="${yb - tfd}" stroke="#b5651d" stroke-width="1.5"/>`;
+  (R.zebra || []).forEach(z => { const x = X(z.x); g += `<g class="stf" data-stf="${z.src}" style="cursor:pointer"><title>Żebro środnika x = ${fmt(z.x / 1000, 2)} m – ${z.strona === 'jedna' ? 'jednostronne' : 'obustronne'} ${fmt(z.bs, 0)}×${fmt(z.ts, 0)} mm (kliknij, aby zmienić)</title><rect x="${x - 5}" y="${yt}" width="10" height="${hs}" fill="#ffffff" fill-opacity="0"/><line x1="${x}" y1="${yt + tf}" x2="${x}" y2="${yb - tfd}" stroke="#b5651d" stroke-width="2.2"/></g>`; });
   // wymiary
   let y = yb + 72;
   const xs = [0].concat(md.sup.map(p => p.x)).concat([L]).filter((v, i, arr) => arr.indexOf(v) === i).sort((p, q) => p - q);
@@ -5820,7 +5912,7 @@ const mk = (id, html) => `<!--ck:${id}-->${html}<!--/ck:${id}-->`;
 const WYS = { pas_g: 'pas górny', srodek: 'środek ścinania', pas_d: 'pas dolny' };
 const SUPN = { przegub: 'przegubowa', utwierdzenie: 'utwierdzenie', sprezyna: 'sprężysta', podatne: 'przegub + sprężyna obrotowa' };
 const WEZN = { brak: 'oparcie na stali', oparcie: 'płyta podporowa', blacha_czolowa: 'krótka blacha czołowa', blacha_zebrowa: 'blacha żebrowa' };
-const V0 = (v, unit) => (v === null || v === undefined || !isFinite(v)) ? '—' : unit === 'MPa' ? f(v, 1) + ' MPa' : unit === 'M' ? f(v / 1e6) + ' kNm' : unit === 'F' ? f(v / 1e3) + ' kN' : unit === 'q' ? f(v, 1) + ' N/mm' : unit === 'mm' ? f(v, 1) + ' mm' : f(v, 3);
+const V0 = (v, unit) => (v === null || v === undefined || !isFinite(v)) ? '—' : unit === 'I' ? f(v / 1e4, 1) + ' cm⁴' : unit === 'MPa' ? f(v, 1) + ' MPa' : unit === 'M' ? f(v / 1e6) + ' kNm' : unit === 'F' ? f(v / 1e3) + ' kN' : unit === 'q' ? f(v, 1) + ' N/mm' : unit === 'mm' ? f(v, 1) + ' mm' : f(v, 3);
 RP.unitFmt = V0;
 
 /* ---------------------------------------------------------- dane wykresów (zakładka Wykresy i raport) */
@@ -5863,8 +5955,8 @@ RP.takeoff = function (S, R) {
     if (w.zebro && (sec.kind === 'I' || sec.kind === 'U')) { const hs = sec.hw || (sec.h - sec.tg - sec.td); rows.push({ poz: poz++, n: `Żebra podporowe – podpora ${p.id}`, mat: S.material.gatunek, szt: sec.kind === 'U' ? 1 : 2, wym: `${f(U.num(w.ts), 0)}×${f(U.num(w.bs), 0)}×${f(hs, 0)}`, m: (sec.kind === 'U' ? 1 : 2) * rho * U.num(w.ts) * U.num(w.bs) * hs }); weld += (sec.kind === 'U' ? 2 : 4) * hs; }
   });
   (R.styki || []).forEach((q, j) => { const o = q.o, s2 = S.styki[j] || {}; if (!o) return; if (o.geom && o.typ === 'nakladkowy') { const g = o.geom; rows.push({ poz: poz++, n: `Styk ${q.id} – nakładki pasów`, mat: (o.plf || {}).gat || S.material.gatunek, szt: g.tfi > 0 ? 6 : 2, wym: `${f(g.bfo, 0)}×${f(g.tfo, 0)}${g.tfi > 0 ? ` + 4×${f(g.bfi, 0)}×${f(g.tfi, 0)}` : ''}, l = ${f(g.Lf, 0)}`, m: 7.85e-6 * 2 * (g.bfo * g.tfo + (g.tfi > 0 ? 2 * g.bfi * g.tfi : 0)) * g.Lf }); rows.push({ poz: poz++, n: `Styk ${q.id} – nakładki środnika`, mat: (o.plw || {}).gat || S.material.gatunek, szt: 2, wym: `${f(g.hpw, 0)}×${f(g.tpw, 0)}, l = ${f(g.Lw, 0)}`, m: 7.85e-6 * 2 * g.hpw * g.tpw * g.Lw }); addB(o); } else if (s2.typ === 'spawany') weld += 2 * (sec.bg || sec.b || 0) + sec.h; });
-  const a = U.num((S.analiza || {}).zebraRozstaw) * 1000;
-  if (a > 0 && (sec.kind === 'I' || sec.kind === 'U')) { let n = 0; for (let x = a; x < md.L - 1; x += a) n++; if (n) { const hs = sec.hw || sec.h, bs = Math.max(40, Math.round(((sec.bg || 100) - (sec.tw || 0)) / 2 - 5)), ts = Math.max(6, Math.ceil((sec.tw || 6))); rows.push({ poz: poz++, n: 'Żebra pośrednie środnika (pary)', mat: S.material.gatunek, szt: 2 * n, wym: `${ts}×${bs}×${f(hs, 0)}`, m: 2 * n * rho * ts * bs * hs }); } }
+  const zg = {}; (R.zebra || []).forEach(z => { const nS = z.strona === 'jedna' ? 1 : 2, k = `${f(z.ts, 0)}×${f(z.bs, 0)}`; zg[k] = zg[k] || { n: 0, ts: z.ts, bs: z.bs }; zg[k].n += nS; });
+  const hsz = sec.hw || sec.h; Object.keys(zg).forEach(k => { const q = zg[k]; rows.push({ poz: poz++, n: 'Żebra poprzeczne środnika', mat: S.material.gatunek, szt: q.n, wym: `${k}×${f(hsz, 0)}`, m: q.n * rho * q.ts * q.bs * hsz }); weld += 2 * q.n * hsz; });
   const tot = rows.reduce((q, r) => q + r.m, 0);
   return { rows, total: tot, bolts, weld, surf: (sec.AmV ? null : null), area: R.pozar && R.pozar.sf ? null : null };
 };
@@ -5942,9 +6034,11 @@ RP.build = function (S, R, opt) {
       if (/^pt\d+$/.test(c.id)) t = patchTxt(c.d, c.n);
       else if (/-MV$/.test(c.id)) t = line(`<b>${esc(c.n)}</b> (x = ${f(c.x / 1000)} m): η̄<sub>1</sub> = M<sub>Ed</sub>/M<sub>pl,Rd</sub> = ${f(c.d.im.e1, 3)}, η̄<sub>3</sub> = V<sub>Ed</sub>/V<sub>bw,Rd</sub> = ${f(c.d.im.e3, 3)}; ${esc(c.d.im.f)} → ${f(c.util, 3)}${okS(c.util)}`, '7.1');
       else if (/-Vb$/.test(c.id)) t = line(`<b>${esc(c.n)}</b> (x = ${f(c.x / 1000)} m; ${esc(c.combo)}): V<sub>Ed</sub>/V<sub>b,Rd</sub> = ${kN(c.Ed)}/${kN(c.Rd)} = ${f(c.util, 3)}${okS(c.util)}`, '5.2');
+      else if (/^ZS\d/.test(c.id)) t = line(`<b>${esc(c.n)}</b>${c.f ? `: ${esc(c.f)}` : ''} → ${f(c.util, 3)} ≤ 1,0${okS(c.util)}`, c.ref);
       else t = line(`<b>${esc(c.n)}</b>: ${f(c.d.eta2, 3)} + 0,8·${f(c.d.eta1, 3)} = ${f(c.Ed, 3)} ≤ 1,4${okS(c.util)}`, '7.2');
       h += mk(c.id, t);
     });
+    if ((R.zebra || []).length) h += '<h3>Żebra poprzeczne środnika i panele</h3>' + line(`Żebra: ${R.zebra.map(z => `x = ${f(z.x / 1000)} m (${z.strona === 'jedna' ? 'jednostronne' : 'obustronne'} ${f(z.bs, 0)}×${f(z.ts, 0)} mm)`).join('; ')}`) + (R.panels || []).map(q => line(`Panel ${f(q.x0 / 1000)}–${f(q.x1 / 1000)} m: a = ${isFinite(q.a) ? f(q.a, 0) + ' mm' : '∞'}, k<sub>τ</sub> = ${f(q.sb.kt, 3)}, λ̄<sub>w</sub> = ${f(q.sb.lw, 3)}, χ<sub>w</sub> = ${f(q.sb.chi, 3)}, V<sub>b,Rd</sub> = ${kN(q.sb.Vb)} kN`, '5.2, 5.3')).join('');
   }
   // ---------------------------------------------------------- 7. stateczność
   h += H2('SGN – stateczność: zwichrzenie i interakcja (PN-EN 1993-1-1, 6.3)');
@@ -6418,8 +6512,7 @@ const GROUPS = [
     { k: ND('kcMet'), t: 'sel', l: 'Współczynnik k_{c}', o: [['tab66', 'tabl. 6.6 / 1/√C₁ (MES)'], ['1', 'k_c = 1 (f = 1, bezpiecznie)']], wide: true },
     { k: 'analiza.muY', t: 'num', l: 'Wyboczenie w płaszczyźnie μ_{y}', list: [0.5, 0.7, 0.85, 1, 1.5, 2], min: 0.1 },
     { k: 'analiza.muZ', t: 'num', l: 'Wyboczenie z płaszczyzny μ_{z}', list: [0.5, 0.7, 0.85, 1], min: 0.1 },
-    { k: 'analiza.zebraRozstaw', t: 'num', l: 'Rozstaw żeber środnika a', u: 'm', list: [0, 0.5, 1, 1.5, 2, 2.5, 3], min: 0, ph: '0 – brak' },
-    { k: 'analiza.slupekSztywny', t: 'chk', l: 'Sztywny słupek podporowy (wyboczenie środnika przy ścinaniu)' },
+    { t: 'html', h: () => stiffSummaryHTML() },
     { t: 'hint', ex: true, exT: 'Jak liczony jest moment krytyczny M_cr?', h: () => 'M<sub>cr</sub> wyznacza metoda elementów skończonych (u, u′, φ, φ′) dla rzeczywistego rozkładu M<sub>y</sub> z każdej decydującej kombinacji i każdego etapu – z wysokością przyłożenia obciążeń (pas górny / środek ścinania / pas dolny), monosymetrią przekroju i wszystkimi stężeniami. Postać zwichrzenia – zakładka <b>Stateczność</b>.' }
   ] },
   { id: 'conn', title: 'Połączenia i styki', items: [
@@ -6510,6 +6603,11 @@ function connSummaryHTML() {
   R.md.sup.forEach((p, i) => { const rp = (R.podpory || []).find(q => q.id === p.id) || { checks: [] }; h += row(`Podpora ${p.id}`, J.jointTxt((S.podpory[i] || {}).wezel || {}, R.sec), rp.checks, `data-cjs="${i}"`); });
   (S.styki || []).forEach((st2, j) => { const cs = R.checks.filter(c => c.id.indexOf(`S${j + 1}-`) === 0); h += row(`Styk S${j + 1}`, `x = ${fmt(U.num(st2.x), 2)} m – ${(BS.W.STYKI[st2.typ] || '')}`, cs, `data-cjt="${j}"`); });
   return h + `</table><div class="row wide"><span></span><span><button class="btn sm pri" data-act="jdes" type="button">Projektowanie połączeń…</button></span></div>`;
+}
+function stiffSummaryHTML() {
+  if (!R || !R.md || !R.sec || !(R.sec.kind === 'I' || R.sec.kind === 'U')) return '';
+  const Z = R.zebra || [], cs = (R.checks || []).filter(c => /^ZS\d/.test(c.id)), bad = cs.some(c => c.status === 'fail'), um = Math.max(0, ...cs.map(c => c.util || 0));
+  return `<div class="row wide"><label>Żebra poprzeczne środnika</label><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="hint" style="margin:0">${Z.length ? `${Z.length} szt.${cs.length ? ` · <span class="st ${bad ? 'fail' : 'ok'}">${bad ? '✖' : '✔'} ${fmt(um * 100, 0)}%</span>` : ''}` : 'brak'}</span><button class="btn sm" data-act="stiff" type="button">Żebra środnika…</button></span></div>`;
 }
 function loadMiniHTML() {
   const n = S.obciazenia.length, on = S.obciazenia.filter(o => o.aktywne !== false).length;
@@ -6793,7 +6891,7 @@ function renderDataSide() {
   const leg = [], out = {};
   const svg = D.scheme(S, R, { W: W2, etap: s, edit: true, sel: selSpans, diag: diagMode === 'off' ? null : diagMode, legend: leg, dims: showDims, out });
   const sel = selList().map(i => md.seg[i].n);
-  const tools = `<span class="schtools">${[['loads', 'Obciążenia', 'Okno obciążeń: zaznaczonych przęseł albo całej belki'], ['sec', 'Przekrój', 'Przekrój i materiał belki'], ['conn', 'Połączenia', 'Okno projektowania połączeń i styków'], ['brace', 'Stężenia', 'Stężenia boczne i skrętne, stężenie ciągłe'], ['stages', 'Etapy', 'Etapy realizacji i podpory montażowe'], ['dims', 'Wymiary', 'Pokaż / ukryj wymiary']].map(([k, l, t]) => `<button class="btn sm${k === 'dims' && showDims ? ' on' : ''}" data-tool="${k}" type="button" title="${t}">${l}</button>`).join('')}</span>`;
+  const tools = `<span class="schtools">${[['loads', 'Obciążenia', 'Okno obciążeń: zaznaczonych przęseł albo całej belki'], ['sec', 'Przekrój', 'Przekrój i materiał belki'], ['conn', 'Połączenia', 'Okno projektowania połączeń i styków'], ['stiff', 'Żebra', 'Żebra poprzeczne środnika'], ['brace', 'Stężenia', 'Stężenia boczne i skrętne, stężenie ciągłe'], ['stages', 'Etapy', 'Etapy realizacji i podpory montażowe'], ['dims', 'Wymiary', 'Pokaż / ukryj wymiary']].map(([k, l, t]) => `<button class="btn sm${k === 'dims' && showDims ? ' on' : ''}" data-tool="${k}" type="button" title="${t}">${l}</button>`).join('')}</span>`;
   const seen = new Set(), legH = leg.filter(q => { const k = String(q.li); if (seen.has(k)) return false; seen.add(k); return true; }).map(q => `<label class="ldl${q.off ? ' off' : ''}" style="top:${(q.y / (out.H || 1) * 100).toFixed(2)}%" title="${q.sw ? 'Ciężar własny belki' : q.off ? 'Obciążenie pominięte – zaznacz, aby uwzględnić' : 'Odznacz, aby pominąć obciążenie w obliczeniach'}"><input type="checkbox" data-ldon="${q.li}" ${q.off ? '' : 'checked'}><i style="background:${q.col}"></i><span>${esc(q.lab)}</span></label>`).join('');
   const dgSw = `<span class="segsw sm dgsw">${[['M', 'M'], ['V', 'V'], ['w', 'ugięcie'], ['N', 'N'], ['R', 'R'], ['off', 'bez wykresu']].map(([k, l]) => `<button type="button" data-dgm="${k}" class="${diagMode === k ? 'on' : ''}">${l}</button>`).join('')}</span>`;
   const stSw = md.nE > 1 ? `<span class="segsw sm">${md.etapy.map((e, i) => `<button type="button" data-stg="${i}" class="${i === s ? 'on' : ''}" title="${esc(e.nazwa)}">Etap ${i + 1}</button>`).join('')}</span>` : '';
@@ -6854,6 +6952,7 @@ function bindSide(el) {
   $$('.tsupp, tr[data-tmp], button[data-tmp]', el).forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); A.stagesPopup(); }));
   $$('.rst', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.bracePopup(g.dataset.rst === 'g' ? null : +g.dataset.rst); }));
   $$('.sty', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.jointDesigner({ styk: +g.dataset.sty }); }));
+  $$('.stf', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.stiffPopup(g.dataset.stf === 'g' ? null : +g.dataset.stf); }));
   $$('[data-cont]', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.bracePopup(); }));
   $$('.elm', el).forEach(g => g.addEventListener('click', ev => { const k = +g.dataset.seg; if (selSpans.has(k)) selSpans.delete(k); else selSpans.add(k); renderDataSide(); }));
   $$('.ld', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); const li = g.dataset.li; if (li === 'sw') { const f = $('[data-ck="ciezarWlasny.auto"]', el); if (f) Q.flash(f.closest('label')); return; } A.loadPopup({ focus: +li }); }));
@@ -6897,6 +6996,8 @@ function schemeAct(a) {
   else if (a === 'none') { selSpans.clear(); renderDataSide(); }
   else if (a === 'schemes') A.schemesPopup();
   else if (a === 'conn') A.jointDesigner();
+  else if (a === 'stiff') A.stiffPopup();
+  else if (a === 'stiffmid') { const sl = selList(); const Z = S.zebraSrodnika; (sl.length ? sl : R.md.seg.map((z, i) => i)).forEach(i => { const z = R.md.seg[i]; if (!z || z.wsp) return; const x = +((z.x0 + z.x1) / 2000).toFixed(3); if (!Z.some(q => Math.abs(U.num(q.x) - x) < 0.02)) Z.push({ x, strona: 'obie', bs: '', ts: '' }); }); Z.sort((p, q) => U.num(p.x) - U.num(q.x)); changed(true); recalc(); A.stiffPopup(); }
   else if (a === 'splice') { const sl = selList(); const sg = R.md.seg[sl.length ? sl[0] : 0]; A.addSplice(sg ? +((sg.x0 + sg.x1) / 2000).toFixed(2) : undefined); }
 }
 A.schemeAct = schemeAct;
@@ -6933,7 +7034,7 @@ function braceMenu(x, y, src) {
 }
 function schemeMenu(x, y) {
   const n = selSpans.size, md = R.md;
-  const it = [['loads', n ? `Obciążenia – ${n === 1 ? md.seg[selList()[0]].n : `zaznaczone (${n})`}…` : 'Obciążenia – cała belka…'], ['sec', 'Przekrój…'], ['brace', 'Stężenia boczne…'], ['stages', 'Etapy realizacji i podpory montażowe…'], ['schemes', 'Schematy typowe…'], ['conn', 'Projektowanie połączeń…'], ['splice', n ? 'Styk montażowy w środku zaznaczonego przęsła…' : 'Styk montażowy…'], ['dims', `${showDims ? '✓ ' : ''}Wymiary`], ['-'], ['all', 'Zaznacz wszystkie przęsła'], ['none', 'Odznacz wszystko (Esc)', !n]];
+  const it = [['loads', n ? `Obciążenia – ${n === 1 ? md.seg[selList()[0]].n : `zaznaczone (${n})`}…` : 'Obciążenia – cała belka…'], ['sec', 'Przekrój…'], ['brace', 'Stężenia boczne…'], ['stages', 'Etapy realizacji i podpory montażowe…'], ['schemes', 'Schematy typowe…'], ['conn', 'Projektowanie połączeń…'], ['stiff', 'Żebra środnika…'], ['stiffmid', n ? 'Żebro w środku zaznaczonego przęsła' : 'Żebra w środkach przęseł'], ['splice', n ? 'Styk montażowy w środku zaznaczonego przęsła…' : 'Styk montażowy…'], ['dims', `${showDims ? '✓ ' : ''}Wymiary`], ['-'], ['all', 'Zaznacz wszystkie przęsła'], ['none', 'Odznacz wszystko (Esc)', !n]];
   Q.ctxMenu(x, y, it.map(([k, l, d]) => [k, esc(l || ''), d]), schemeAct);
 }
 
@@ -7042,7 +7143,7 @@ function about() {
 }
 function doAct(a) {
   ({ new: newProject, open: openFile, save: () => saveFile(false), saveas: () => saveFile(true), print: doPrint, exporthtml: () => BS.V.exportHTML(), about,
-    schemes: () => A.schemesPopup(), jdes: () => A.jointDesigner(), addsplice: () => A.addSplice(), secwin: () => A.secPopup(), sectab: () => A.secTablePopup(), loads: () => A.loadPopup({ all: true }), snow: () => A.snowPopup() }[a] || (() => {}))();
+    schemes: () => A.schemesPopup(), stiff: () => A.stiffPopup(), jdes: () => A.jointDesigner(), addsplice: () => A.addSplice(), secwin: () => A.secPopup(), sectab: () => A.secTablePopup(), loads: () => A.loadPopup({ all: true }), snow: () => A.snowPopup() }[a] || (() => {}))();
 }
 A.doAct = doAct;
 
@@ -7107,7 +7208,7 @@ const { $, $$, esc, fmt, sym, setP, getP, parseNum, showNum, exDetails } = Q;
 const S = () => A.S(), R = () => A.R();
 const RODZ = () => BS.S.RODZAJE;
 const closeM = () => { A.setPopRedraw(null); Q.closeModal(); };
-const unitFmt = (v, u) => (v === null || v === undefined || !isFinite(v)) ? '—' : u === 'M' ? fmt(v / 1e6, 2) + ' kNm' : u === 'F' ? fmt(v / 1e3, 2) + ' kN' : u === 'q' ? fmt(v, 1) + ' N/mm' : u === 'mm' ? fmt(v, 1) + ' mm' : u === 'Hz' ? fmt(v, 2) + ' Hz' : u === 'C' ? fmt(v, 0) + ' °C' : u === 'min' ? fmt(v, 0) + ' min' : u === 'MPa' ? fmt(v, 1) + ' MPa' : fmt(v, 3);
+const unitFmt = (v, u) => (v === null || v === undefined || !isFinite(v)) ? '—' : u === 'I' ? fmt(v / 1e4, 1) + ' cm⁴' : u === 'M' ? fmt(v / 1e6, 2) + ' kNm' : u === 'F' ? fmt(v / 1e3, 2) + ' kN' : u === 'q' ? fmt(v, 1) + ' N/mm' : u === 'mm' ? fmt(v, 1) + ' mm' : u === 'Hz' ? fmt(v, 2) + ' Hz' : u === 'C' ? fmt(v, 0) + ' °C' : u === 'min' ? fmt(v, 0) + ' min' : u === 'MPa' ? fmt(v, 1) + ' MPa' : fmt(v, 3);
 A.unitFmt = unitFmt;
 const pct = (u) => (u === null || u === undefined) ? '—' : isFinite(u) ? fmt(u * 100, 0) + '%' : '∞';
 const STL = { ok: 'spełniony', warn: 'uwaga', fail: 'NIE spełniony', info: 'informacyjnie' };
@@ -7410,6 +7511,48 @@ A.bracePopup = function (focus) {
   draw();
 };
 
+
+/* ================================================================ ŻEBRA POPRZECZNE ŚRODNIKA */
+A.stiffPopup = function (focus) {
+  const m = $('#modal');
+  const live = () => {
+    const r = R(), ck = $('#zsCk', m), pn = $('#zsPn', m); if (!r || !ck) return;
+    ck.innerHTML = checksHTML((r.checks || []).filter(c => /^ZS\d|-ZB$|-ZD$|-ZC$/.test(c.id) || /-Vb$|-MV$/.test(c.id))); bindNref(ck);
+    if (pn) pn.innerHTML = (r.panels || []).length ? `<table class="ctab"><thead><tr><th>Panel x [m]</th><th>a [mm]</th><th>a/h<sub>w</sub></th><th>k<sub>τ</sub></th><th>λ̄<sub>w</sub></th><th>χ<sub>w</sub></th><th>V<sub>b,Rd</sub> [kN]</th></tr></thead><tbody>${r.panels.map(q => `<tr><td>${fmt(q.x0 / 1000, 2)}–${fmt(q.x1 / 1000, 2)}</td><td class="n">${isFinite(q.a) ? fmt(q.a, 0) : '∞ (bez żeber na końcach)'}</td><td class="n">${isFinite(q.a) ? fmt(q.a / r.sec.hw, 2) : '—'}</td><td class="n">${fmt(q.sb.kt, 2)}</td><td class="n">${fmt(q.sb.lw, 3)}</td><td class="n">${fmt(q.sb.chi, 3)}</td><td class="n"><b>${fmt(q.sb.Vb / 1e3, 1)}</b></td></tr>`).join('')}</tbody></table><p class="hint">${r.sb && r.sb.need ? 'h<sub>w</sub>/t<sub>w</sub> > 72ε/η – wymagane sprawdzenie wyboczenia przy ścinaniu.' : 'Wyboczenie przy ścinaniu nie decyduje (h<sub>w</sub>/t<sub>w</sub> ≤ 72ε/η).'} Panel ograniczony żebrami (lub żebrem podporowym) po obu stronach ma skończone a; poza nimi a = ∞ (k<sub>τ</sub> = 5,34).</p>` : '';
+  };
+  const draw = () => {
+    const st = S(), r = R(), sec = r && r.sec; if (!r || !r.md || !sec) { closeM(); return; }
+    if (!(sec.kind === 'I' || sec.kind === 'U')) { m.innerHTML = '<div class="dlg sm"><h3>Żebra środnika</h3><p>Żebra poprzeczne środnika – dla dwuteowników i ceowników.</p><div class="dbtn"><button class="btn pri" id="nClose" type="button">Zamknij</button></div></div>'; m.style.display = 'flex'; $('#nClose', m).onclick = closeM; return; }
+    const au = J.stiffAuto(sec), L = st.zebraSrodnika, md = r.md, gen = (r.zebra || []).filter(z => z.src === 'g');
+    let h = `<div class="dlg fpop lpop" style="max-width:900px"><h3>Żebra poprzeczne środnika</h3><p class="hint">Żebra usztywniają środnik: dzielą go na panele (wyboczenie przy ścinaniu, PN-EN 1993-1-5, 5), przenoszą siły skupione (bez sprawdzenia docisku środnika) i – przy podporach – reakcje (żebra podporowe, 9.4). Położenie x od lewego końca belki. Wymiary domyślne: b<sub>s</sub> = ${au.bs} mm, t<sub>s</sub> = ${au.ts} mm (b<sub>s</sub>/t<sub>s</sub> ≤ √(E/(5,3f<sub>y</sub>))).</p>`;
+    h += `<div class="addbar"><span>Dodaj:</span><button class="addb" data-zadd="mid" type="button">+ w środkach przęseł</button><button class="addb" data-zadd="P" type="button">+ pod siłami skupionymi</button><button class="addb" data-zadd="sup" type="button">+ przy podporach</button><button class="addb" data-zadd="one" type="button">+ żebro</button>${L.length ? '<button class="addb" data-zadd="clr" type="button">usuń wszystkie</button>' : ''}</div><div class="fields">`;
+    if (!L.length) h += '<p class="lnone">Brak żeber zadanych w punktach.</p>';
+    L.forEach((z, i) => { h += `<div class="litem" data-zidx="${i}"><div class="lrow"><span class="lid">Z${i + 1}</span><span>x</span><input class="txt sm" data-zz="${i}.x" value="${esc(showNum(z.x))}" autocomplete="off"><span class="u">m</span>${sec.kind === 'I' ? `<select data-zz="${i}.strona"><option value="obie" ${z.strona !== 'jedna' ? 'selected' : ''}>obustronne</option><option value="jedna" ${z.strona === 'jedna' ? 'selected' : ''}>jednostronne</option></select>` : '<span class="lx">jednostronne</span>'}<span>b<sub>s</sub></span><input class="txt sm" data-zz="${i}.bs" value="${esc(showNum(z.bs))}" placeholder="${au.bs}" autocomplete="off"><span>t<sub>s</sub></span><input class="txt sm" data-zz="${i}.ts" value="${esc(showNum(z.ts))}" placeholder="${au.ts}" autocomplete="off"><span class="u">mm</span><button class="del sm" data-zdl="${i}" type="button" title="Usuń żebro">×</button></div></div>`; });
+    h += `</div><h4 class="lsec">Żebra rozmieszczone równomiernie w przęsłach</h4><div class="fields">${fNum('analiza.zebraRozstaw', 'Rozstaw żeber a (0 – brak)', 'm', [0, 1, 1.5, 2, 2.5, 3, 4], { min: 0, re: true })}${U.num(st.analiza.zebraRozstaw) > 0 ? fChk('analiza.zebraPodpory', 'Także w osiach podpór (żebra podporowe)', { re: true }) + fNum('analiza.zebraBs', 'Szerokość b_{s}', 'mm', [60, 80, 100, 120, 140], { opt: true, ph: String(au.bs) }) + fNum('analiza.zebraTs', 'Grubość t_{s}', 'mm', [8, 10, 12, 15, 20], { opt: true, ph: String(au.ts) }) + `<p class="hint" style="margin:2px 0">Liczba żeber z rozstawu: ${gen.length}.</p>` : ''}${fChk('analiza.slupekSztywny', 'Sztywny słupek podporowy (żebra podporowe tworzą słupek sztywny – tabl. 5.1)')}</div>`;
+    h += `<h4 class="lsec">Panele środnika</h4><div id="zsPn"></div><h4 class="lsec">Sprawdzenia (na bieżąco)</h4><div id="zsCk"></div><div class="dbtn"><span class="sp"></span><button class="btn pri" id="nClose" type="button">Zamknij</button></div></div>`;
+    const keep = $('.dlg.lpop', m) ? $('.dlg.lpop', m).scrollTop : 0;
+    m.innerHTML = h; m.style.display = 'flex'; $('.dlg.lpop', m).scrollTop = keep;
+    A.bindFields(m, (re) => { if (re) { A.recalcNow(); draw(); } });
+    $$('[data-zz]', m).forEach(el => el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => { const [i, f] = el.dataset.zz.split('.'); if (el.tagName === 'SELECT') { S().zebraSrodnika[+i][f] = el.value; A.changed(false); return; } const t = el.value.trim(), v = t === '' && f !== 'x' ? '' : parseNum(t); const bad = v === null || (f === 'x' && (v < 0 || v > R().md.L / 1000)) || (v !== '' && f !== 'x' && v <= 0); el.classList.toggle('bad', bad); if (bad) return; S().zebraSrodnika[+i][f] = v; A.changed(false); }));
+    $$('[data-zdl]', m).forEach(b => b.addEventListener('click', () => { S().zebraSrodnika.splice(+b.dataset.zdl, 1); A.changed(true); A.recalcNow(); draw(); }));
+    $$('[data-zadd]', m).forEach(b => b.addEventListener('click', () => {
+      const k = b.dataset.zadd, md2 = R().md, Z = S().zebraSrodnika, has = (x) => Z.some(z => Math.abs(U.num(z.x) - x) < 0.02), add = (x) => { x = +x.toFixed(3); if (!has(x)) Z.push({ x, strona: 'obie', bs: '', ts: '' }); };
+      if (k === 'mid') md2.seg.filter(z => !z.wsp).forEach(z => add((z.x0 + z.x1) / 2000));
+      else if (k === 'sup') md2.sup.forEach(p => add(p.x / 1000));
+      else if (k === 'P') md2.cases.forEach(c => c.parts.forEach(p2 => { if (p2.typ === 'P' && p2.kier === 'z') add(p2.x / 1000); }));
+      else if (k === 'clr') Z.length = 0;
+      else add(md2.L / 2000 + (has(md2.L / 2000) ? 0.25 : 0));
+      Z.sort((p2, q) => U.num(p2.x) - U.num(q.x));
+      A.changed(true); A.recalcNow(); draw();
+    }));
+    $('#nClose', m).onclick = closeM;
+    if (focus !== undefined && focus !== null) { const it = $(`.litem[data-zidx="${focus}"]`, m); if (it) { it.classList.add('focus'); it.scrollIntoView({ block: 'center' }); } }
+    live();
+  };
+  A.setPopRedraw(live);
+  draw();
+};
+
 /* ================================================================ ETAPY I PODPORY MONTAŻOWE */
 A.stagesPopup = function () {
   const m = $('#modal');
@@ -7447,7 +7590,7 @@ A.nodePopup = function (x) {
     <table class="kv"><tr><td>M<sub>Ed</sub> (obwiednia SGN, etap ${s + 1})</td><td class="n"><b>${fmt(at(ev.Mmax) / 1e6, 2)} / ${fmt(at(ev.Mmin) / 1e6, 2)}</b> kNm</td></tr><tr><td>V<sub>Ed</sub></td><td class="n"><b>${fmt(at(ev.Vmax) / 1e3, 2)} / ${fmt(at(ev.Vmin) / 1e3, 2)}</b> kN</td></tr><tr><td>ugięcie (char.)</td><td class="n"><b>${fmt(at(ev.wmax), 2)}</b> mm</td></tr></table>
     <h4 class="lsec">Dodaj w tym miejscu</h4>
     <div class="zg"><span>Siła skupiona P</span><input class="txt" id="ndP" value="10"><span>kN do przypadku</span><select id="ndC">${cases.map(([i, l]) => `<option value="${i}">${esc(l.slice(0, 40))}</option>`).join('')}<option value="new">nowy przypadek (Q)</option></select><button class="btn sm" id="ndAddP" type="button">Dodaj siłę</button></div>
-    <div class="zg"><button class="btn sm" id="ndBr" type="button">+ stężenie boczne pasa górnego</button><button class="btn sm" id="ndTs" type="button" ${S().etapy.length < 2 ? 'disabled title="Wymaga co najmniej dwóch etapów"' : ''}>+ podpora montażowa</button><button class="btn sm" id="ndSp" type="button">+ styk montażowy</button></div>
+    <div class="zg"><button class="btn sm" id="ndBr" type="button">+ stężenie boczne pasa górnego</button><button class="btn sm" id="ndTs" type="button" ${S().etapy.length < 2 ? 'disabled title="Wymaga co najmniej dwóch etapów"' : ''}>+ podpora montażowa</button><button class="btn sm" id="ndSp" type="button">+ styk montażowy</button><button class="btn sm" id="ndZs" type="button">+ żebro środnika</button></div>
     <div class="dbtn"><button class="btn pri" id="nClose" type="button">Zamknij</button></div>`, 'fpop sm');
   const X = +(x / 1000).toFixed(3);
   $('#nClose', m).onclick = closeM;
@@ -7455,6 +7598,7 @@ A.nodePopup = function (x) {
   $('#ndBr', m).onclick = () => { S().stezenia.push({ x: X, typ: 'boczne', wys: 'pas_g', odEtapu: 0, bocznieY: true }); closeM(); A.changed(true); };
   $('#ndTs', m).onclick = () => { S().podporyTymczasowe.push({ x: X, usunietaPo: 0, ss: 100 }); closeM(); A.changed(true); };
   $('#ndSp', m).onclick = () => { closeM(); A.addSplice(X); };
+  $('#ndZs', m).onclick = () => { const Z = S().zebraSrodnika; Z.push({ x: X, strona: 'obie', bs: '', ts: '' }); Z.sort((p2, q) => U.num(p2.x) - U.num(q.x)); A.changed(true); A.recalcNow(); A.stiffPopup(Z.findIndex(z => U.num(z.x) === X)); };
 };
 
 /* ================================================================ SCHEMATY TYPOWE */
@@ -7493,6 +7637,7 @@ A.gotoCheck = function (c) {
   const hl = (sel) => Q.hlg(sel);
   const supI = () => { const r = R(); const sid = (/podpora (\S+)/.exec(grp) || [])[1] || id.split('-')[0]; const i = r.md.sup.findIndex(p => p.id === sid); return i; };
   if (/^Podpory/.test(grp)) { const i = supI(); if (i < 0) return go('elev', () => hl('#p-elev .elevbox')); if (/-C\d|-D\d|-Z\d/.test(id)) return go('elev', () => A.jointDesigner({ sup: i })); const foc = /-B\d/.test(id) ? 'plate' : /-ZB|-ZD|-ZC/.test(id) ? 'stiff' : null; return go('elev', () => A.supportPopup(i, foc)); }
+  if (/^ZS\d/.test(id)) return go('elev', () => A.stiffPopup());
   if (/^Styki/.test(grp)) { const j = +((/S(\d+)/.exec(id) || [])[1] || 1) - 1; return go('elev', () => A.jointDesigner({ styk: j })); }
   if (/-LT\d|-I\d/.test(id)) return go('ltb', () => hl(`#p-ltb tr[data-cid="${esc(id)}"]`) || hl('#p-ltb .card'));
   if (/^SGU – ugięcia/.test(grp)) return go('data', () => hl(['#inputs [data-k="sgu.wmax"]', '#inputs [data-k="sgu.w3"]', '#inputs [data-k="sgu.podniesienie"]']));
@@ -7754,6 +7899,331 @@ A.jointDesigner = function (sel) {
 })();
 
 </script>
+<script>/* src/ui/widok3d.js */
+/* =====================================================================
+   BelkaStal – widok 3D belki z połączeniami (zakładka „Belka i połączenia”).
+   Własny renderer (bez bibliotek – aplikacja działa offline): bryły
+   z wielokątów, perspektywa, cieniowanie płaskie, algorytm malarza
+   z podziałem długich ścian, krawędzie charakterystyczne, wybór
+   elementu myszą.  Elementy: belka (wyciągnięty przekrój), żebra
+   środnika i podporowe, blachy czołowe / żebrowe, kątowniki, śruby,
+   spoiny, elementy podpierające (słup, podciąg, płyta, mur / beton),
+   styki nakładkowe, stężenia, podpory montażowe, płyta stropowa.
+   Obsługa: przeciąganie – obrót, prawy przycisk / Shift – przesuw,
+   kółko – przybliżenie, dwuklik – widok ogólny, kliknięcie – edycja.
+   ===================================================================== */
+(function () {
+'use strict';
+const BS = window.BS, U = BS.U, Q = BS.Q, A = BS.A, M = BS.M, P = BS.P;
+const V3 = BS.V3 = {};
+const { esc, fmt } = Q;
+const COL = { beam: [150, 170, 200], plate: [230, 163, 90], angle: [196, 128, 64], bolt: [70, 76, 90], weld: [200, 50, 50], col: [176, 184, 196], conc: [205, 199, 186], mur: [190, 120, 92], stiff: [214, 150, 80], brace: [120, 90, 190], tmp: [235, 160, 40], slab: [190, 190, 185], cover: [235, 175, 100] };
+let cam = null;                       // stan kamery – zachowany między przeliczeniami
+let opts = (() => { try { return Object.assign({ slab: false, sup: true, xray: false }, JSON.parse(localStorage.getItem('bs.v3') || '{}')); } catch (e) { return { slab: false, sup: true, xray: false }; } })();
+
+/* ---------------------------------------------------------- wektory */
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+
+/* ---------------------------------------------------------- scena */
+function Scene() { this.f = []; this.obj = []; }
+Scene.prototype.o = function (name, act, extra) { this.obj.push(Object.assign({ name, act }, extra || {})); return this.obj.length - 1; };
+// ściana płaska: pts – wierzchołki, n – normalna zewnętrzna, e – krawędzie charakterystyczne (tablica bool), hole – otwór
+Scene.prototype.face = function (pts, n, col, ob, e, alpha, hole) { this.f.push({ p: pts, n, col, ob, e: e || pts.map(() => true), a: alpha || 1, hole }); };
+// prostopadłościan (osie X, Y, Z); nx – podział wzdłuż X (długie elementy)
+Scene.prototype.box = function (x0, x1, y0, y1, z0, z1, col, ob, alpha, nx) {
+  if (x0 > x1) [x0, x1] = [x1, x0]; if (y0 > y1) [y0, y1] = [y1, y0]; if (z0 > z1) [z0, z1] = [z1, z0];
+  if (x1 - x0 < 1e-6 || y1 - y0 < 1e-6 || z1 - z0 < 1e-6) return;
+  const n = Math.max(1, nx || 1), X = (k) => x0 + (x1 - x0) * k / n;
+  for (let k = 0; k < n; k++) {
+    const a = X(k), b = X(k + 1), first = k === 0, last = k === n - 1;
+    this.face([[a, y0, z0], [b, y0, z0], [b, y0, z1], [a, y0, z1]], [0, -1, 0], col, ob, [true, last, true, first], alpha);
+    this.face([[a, y1, z0], [b, y1, z0], [b, y1, z1], [a, y1, z1]], [0, 1, 0], col, ob, [true, last, true, first], alpha);
+    this.face([[a, y0, z0], [b, y0, z0], [b, y1, z0], [a, y1, z0]], [0, 0, -1], col, ob, [true, last, true, first], alpha);
+    this.face([[a, y0, z1], [b, y0, z1], [b, y1, z1], [a, y1, z1]], [0, 0, 1], col, ob, [true, last, true, first], alpha);
+  }
+  this.face([[x0, y0, z0], [x0, y1, z0], [x0, y1, z1], [x0, y0, z1]], [-1, 0, 0], col, ob, null, alpha);
+  this.face([[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]], [1, 0, 0], col, ob, null, alpha);
+};
+// graniastosłup o osi od p0 do p1, przekrój – wielokąt foremny (k boków, promień r); sharp – krawędzie boczne widoczne
+Scene.prototype.prism = function (p0, p1, r, k, col, ob, sharp, rot) {
+  const d = norm(sub(p1, p0)), t = Math.abs(d[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0], u = norm(cross(d, t)), v = cross(d, u);
+  const ring = []; for (let i = 0; i < k; i++) { const a = (rot || 0) + 2 * Math.PI * i / k; ring.push(add(mul(u, r * Math.cos(a)), mul(v, r * Math.sin(a)))); }
+  for (let i = 0; i < k; i++) {
+    const a = ring[i], b = ring[(i + 1) % k], nn = norm(add(a, b));
+    this.face([add(p0, a), add(p1, a), add(p1, b), add(p0, b)], nn, col, ob, [!!sharp, true, !!sharp, true]);
+  }
+  this.face(ring.map(q => add(p0, q)).reverse(), mul(d, -1), col, ob);
+  this.face(ring.map(q => add(p1, q)), d, col, ob);
+};
+// śruba: łeb (sześciokąt) przy p0, trzpień do p1, nakrętka przy p1
+Scene.prototype.bolt = function (p0, p1, B, ob) {
+  const d = norm(sub(p1, p0)), dd = B ? B.dd : 16, s = B ? B.s : 24, R6 = s / Math.sqrt(3);
+  this.prism(sub(p0, mul(d, 0.65 * dd)), p0, R6, 6, COL.bolt, ob, true, Math.PI / 6);
+  this.prism(sub(p0, mul(d, 0.1)), add(p1, mul(d, 0.25 * dd)), dd / 2, 8, COL.bolt, ob, false);
+  this.prism(p1, add(p1, mul(d, 0.8 * dd)), R6, 6, COL.bolt, ob, true, Math.PI / 6);
+};
+// wyciągnięcie przekroju (pierścienie y–z) wzdłuż X od x0 do x1
+// podział belki wzdłuż X: gęsto przy elementach (połączenia, żebra, styki), rzadziej dalej – poprawna kolejność rysowania
+function gridXs(L, feats, maxStep) {
+  const F = Array.from(new Set([0, L].concat(feats).filter(x => x >= 0 && x <= L).map(x => Math.round(x)))).sort((a, b) => a - b);
+  const out = [F[0]];
+  for (let i = 0; i < F.length - 1; i++) {
+    const a = F[i], b = F[i + 1]; if (b - a < 1) continue;
+    const mid = (a + b) / 2, lt = [], rt = []; let s = 35, x = a; while (x + s < mid - 10) { x += s; lt.push(x); s = Math.min(s * 1.55, maxStep); }
+    s = 35; x = b; while (x - s > mid + 10) { x -= s; rt.push(x); s = Math.min(s * 1.55, maxStep); }
+    lt.concat(rt.reverse()).forEach(v => out.push(v)); out.push(b);
+  }
+  return out;
+}
+// uproszczenie pierścienia przekroju (łuki zaokrągleń – mniej ścian)
+function simplify(r, h) {
+  if (r.length < 12) return r;
+  const keep = r.filter((p, i) => { const a = r[(i - 1 + r.length) % r.length], c = r[(i + 1) % r.length]; const e1 = norm([0, p[0] - a[0], p[1] - a[1]]), e2 = norm([0, c[0] - p[0], c[1] - p[1]]); return dot(e1, e2) < 0.985 || i % 3 === 0; });
+  return keep.length >= 4 ? keep : r;
+}
+Scene.prototype.extrude = function (rings, xs, col, ob, alpha) {
+  if (!Array.isArray(xs)) xs = [xs, arguments[2]];
+  const area = (r) => r.reduce((s2, p, i) => { const q = r[(i + 1) % r.length]; return s2 + p[0] * q[1] - q[0] * p[1]; }, 0) / 2;
+  const R0 = rings.map((r, i) => { const ccw = area(r) > 0; return (i === 0) === ccw ? r : r.slice().reverse(); });
+  const sharpAt = (r, i) => { const a = r[(i - 1 + r.length) % r.length], b = r[i], c = r[(i + 1) % r.length]; const e1 = norm([0, b[0] - a[0], b[1] - a[1]]), e2 = norm([0, c[0] - b[0], c[1] - b[1]]); return dot(e1, e2) < 0.93; };
+  const n = xs.length - 1, X = (k) => xs[k], x0 = xs[0], x1 = xs[n];
+  R0.forEach(r => {
+    const sh = r.map((p, i) => sharpAt(r, i));
+    for (let i = 0; i < r.length; i++) {
+      const p = r[i], q = r[(i + 1) % r.length], dy = q[0] - p[0], dz = q[1] - p[1]; if (Math.hypot(dy, dz) < 1e-6) continue;
+      const nn = norm([0, dz, -dy]);
+      for (let k = 0; k < n; k++) {
+        const a = X(k), b = X(k + 1);
+        this.face([[a, p[0], p[1]], [b, p[0], p[1]], [b, q[0], q[1]], [a, q[0], q[1]]], nn, col, ob, [sh[i], k === n - 1, sh[(i + 1) % r.length], k === 0], alpha);
+      }
+    }
+  });
+  const cap = (x, s) => { const outer = R0[0].map(p => [x, p[0], p[1]]); this.face(s > 0 ? outer : outer.slice().reverse(), [s, 0, 0], col, ob, null, alpha, R0.length > 1 ? R0.slice(1).map(r => r.map(p => [x, p[0], p[1]])) : null); };
+  cap(x0, -1); cap(x1, 1);
+};
+
+/* ---------------------------------------------------------- budowa modelu */
+function build(S, R) {
+  const sc = new Scene(), md = R.md, sec = R.sec, L = md.L, h = sec.h, tw = sec.tw || sec.t || 6;
+  const tg = sec.tg || sec.t || 0, td = sec.td || sec.t || 0, bg = sec.bg || sec.b || 100, bd = sec.bd || sec.b || 100;
+  const yw0 = sec.kind === 'U' || sec.kind === 'L' ? 0 : -tw / 2, yw1 = yw0 + tw, ywc = (yw0 + yw1) / 2;
+  const nseg = U.clamp(Math.round(L / Math.max(150, 1.5 * h)), 6, 90);
+  const beam = sc.o(`Belka ${sec.nazwa} – ${S.material.gatunek}${S.material.podgatunek}, L = ${fmt(L / 1000, 2)} m`, () => A.secPopup(), { kind: 'beam' });
+  const feats = [];
+  md.sup.forEach(p => [-400, -200, -100, -40, 0, 40, 100, 200, 400].forEach(d => feats.push(p.x + d)));
+  (R.zebra || []).forEach(z => [-60, 0, 60].forEach(d => feats.push(z.x + d)));
+  (R.styki || []).forEach(q => { const g = (q.o && q.o.geom) || {}, hl = Math.max(U.num(g.Lf), U.num(g.Lw), 200) / 2; [-hl - 60, -hl, -hl / 2, 0, hl / 2, hl, hl + 60].forEach(d => feats.push(q.x + d)); });
+  (md.stez || []).forEach(z => [-40, 0, 40].forEach(d => feats.push(z.x + d)));
+  md.tmp.forEach(t => [-60, 0, 60].forEach(d => feats.push(t.x + d)));
+  const xsB = gridXs(L, feats, Math.max(200, 1.2 * h));
+  sc.extrude(sec.rings.map(r => simplify(r, h)), xsB, COL.beam, beam, opts.xray ? 0.35 : 1);
+  // żebra środnika
+  (R.zebra || []).forEach(z => {
+    const ob = sc.o(`Żebro środnika x = ${fmt(z.x / 1000, 2)} m – ${z.strona === 'jedna' ? 'jednostronne' : 'obustronne'} ${fmt(z.bs, 0)}×${fmt(z.ts, 0)} mm`, () => A.stiffPopup(z.src === 'g' ? null : z.src), { kind: 'stiff', x: z.x });
+    const zz0 = td, zz1 = h - tg;
+    if (sec.kind === 'U' || z.strona !== 'jedna') sc.box(z.x - z.ts / 2, z.x + z.ts / 2, yw1, yw1 + z.bs, zz0, zz1, COL.stiff, ob);
+    if (sec.kind === 'I') sc.box(z.x - z.ts / 2, z.x + z.ts / 2, yw0 - z.bs, yw0, zz0, zz1, COL.stiff, ob);
+  });
+  // podpory i połączenia
+  const last = md.sup.length - 1;
+  md.sup.forEach((p, i) => {
+    const w = (S.podpory[i] || {}).wezel || { typ: 'brak' }, rp = (R.podpory || []).find(q => q.id === p.id) || {}, o = rp.pol;
+    const isEnd = (i === 0 && md.wL === 0) || (i === last && md.wP === 0), s = i === 0 && isEnd ? 1 : i === last && isEnd ? -1 : 1;
+    const X = (xi) => p.x + s * xi;              // współrzędna lokalna ξ: od czoła belki w głąb belki
+    const name = `Podpora ${p.id} – ${BS.J.jointTxt(w, sec)}`;
+    const ob = sc.o(name, () => (['blacha_czolowa', 'blacha_zebrowa', 'katowniki', 'spawane'].includes(w.typ) ? A.jointDesigner({ sup: i }) : A.supportPopup(i)), { kind: 'sup', x: p.x });
+    const conn = isEnd && o && ['blacha_czolowa', 'blacha_zebrowa', 'katowniki', 'spawane'].includes(w.typ);
+    // żebra podporowe
+    if (w.zebro && (sec.kind === 'I' || sec.kind === 'U')) { const bs = U.num(w.bs, 70), ts = U.num(w.ts, 10); sc.box(p.x - ts / 2, p.x + ts / 2, yw1, yw1 + bs, td, h - tg, COL.stiff, ob); if (sec.kind === 'I') sc.box(p.x - ts / 2, p.x + ts / 2, yw0 - bs, yw0, td, h - tg, COL.stiff, ob); }
+    if (!opts.sup && !conn) return;
+    if (conn) {
+      const g = o.geom || {}, B = o.B, tsup = Math.max(6, U.num(w.tsup, 12)), sup = w.sup || 'pas_slupa';
+      const face0 = w.typ === 'blacha_czolowa' ? -U.num(g.tp, 10) : w.typ === 'spawane' ? 0 : -U.num(g.gap, U.num(w.gap, 10));
+      // element podpierający
+      if (opts.sup) {
+        const bc = Math.max(bg + 120, 260), hc = Math.max(240, 0.9 * bc), zA = -350, zB = h + 300;
+        const sob = sc.o(`${BS.W.PODPORA[sup] || 'Element podpierający'} – t = ${fmt(tsup, 0)} mm (${w.supGat || ''})`, () => A.jointDesigner({ sup: i }), { kind: 'sup', x: p.x });
+        if (sup === 'pas_slupa') { sc.box(X(face0), X(face0 - tsup), ywc - bc / 2, ywc + bc / 2, zA, zB, COL.col, sob); sc.box(X(face0 - tsup), X(face0 - hc + tsup), ywc - 0.35 * tsup, ywc + 0.35 * tsup, zA, zB, COL.col, sob); sc.box(X(face0 - hc + tsup), X(face0 - hc), ywc - bc / 2, ywc + bc / 2, zA, zB, COL.col, sob); }
+        else if (sup === 'srodnik_slupa') { sc.box(X(face0), X(face0 - tsup), ywc - hc / 2, ywc + hc / 2, zA, zB, COL.col, sob); [-1, 1].forEach(k => sc.box(X(face0 + 0.0), X(face0 - bc), ywc + k * hc / 2, ywc + k * (hc / 2 + 1.6 * tsup), zA, zB, COL.col, sob)); }
+        else if (sup === 'srodnik_belki') { const hz0 = -150, hz1 = h + 20; sc.box(X(face0), X(face0 - tsup), ywc - 900, ywc + 900, hz0, hz1, COL.col, sob, 1, 6); [hz1, hz0 - 18].forEach(zf => sc.box(X(face0 + bc / 2 - tsup / 2 - 60), X(face0 - bc / 2 - tsup / 2 + 60), ywc - 900, ywc + 900, zf, zf + 18, COL.col, sob, 1, 6)); }
+        else sc.box(X(face0), X(face0 - tsup), ywc - bc / 2, ywc + bc / 2, -60, h + 60, COL.col, sob);
+      }
+      const hp = U.num(g.hp, 0.6 * h), zTop = h - (h - hp) / 2;
+      const bob = sc.o(`Śruby ${B ? BS.W.boltTxt(B) : ''} – podpora ${p.id}`, () => A.jointDesigner({ sup: i }), { kind: 'sup', x: p.x });
+      const wob = sc.o(`Spoiny – podpora ${p.id}`, () => A.jointDesigner({ sup: i }), { kind: 'sup', x: p.x });
+      if (w.typ === 'blacha_czolowa') {
+        const tp = g.tp, bp = g.bp;
+        sc.box(X(0), X(-tp), ywc - bp / 2, ywc + bp / 2, zTop - hp, zTop, COL.plate, ob);
+        (o.bolts || []).forEach(b => { const y = ywc + b.x, z = zTop - b.z; sc.bolt([X(0), y, z], [X(-tp - tsup), y, z], B, bob); });
+        const a = U.num(g.a, 5); [yw0 - a, yw1].forEach(y0 => sc.box(X(0), X(a), y0, y0 + a, zTop - hp + a, zTop - a, COL.weld, wob));
+      } else if (w.typ === 'blacha_zebrowa') {
+        const lp = g.z + (g.nc - 1) * g.p2 + g.e2, tp = g.tp, gp = g.gap;
+        // blacha po stronie obserwatora (−y); dla ceownika – od strony grzbietu środnika
+        sc.box(X(-gp), X(-gp + lp), yw0 - tp, yw0, zTop - hp, zTop, COL.plate, ob);
+        (o.bolts || []).forEach(b => { const x = X(-gp + b.x), z = zTop - b.z; sc.bolt([x, yw1, z], [x, yw0 - tp, z], B, bob); });
+        const a = U.num(g.a, 6); sc.box(X(-gp), X(-gp + a), yw0 - tp - a, yw0 - tp, zTop - hp, zTop, COL.weld, wob); sc.box(X(-gp), X(-gp + a), yw0, yw0 + a, zTop - hp, zTop, COL.weld, wob);
+      } else if (w.typ === 'katowniki') {
+        const ta = g.ta, gp = g.gap;
+        [1, -1].forEach(k => {
+          const yA = k > 0 ? yw1 : yw0;
+          sc.box(X(-gp), X(-gp + g.lb), yA, yA + k * ta, zTop - hp, zTop, COL.angle, ob);
+          sc.box(X(-gp), X(-gp + ta), yA, yA + k * g.ls, zTop - hp, zTop, COL.angle, ob);
+        });
+        (o.bolts || []).forEach(b => { const x = X(-gp + g.gb), z = zTop - b.z; sc.bolt([x, yw0 - ta, z], [x, yw1 + ta, z], B, bob); [1, -1].forEach(k => { const y = (k > 0 ? yw1 : yw0) + k * g.gs; sc.bolt([X(-gp + ta), y, z], [X(-gp - tsup), y, z], B, bob); }); });
+      } else if (w.typ === 'spawane') {
+        const aw = U.num(w.aw, 5);
+        if (w.spoiny === 'czolowa') sc.box(X(0), X(3), yw0 - 1, yw1 + 1, 0, h, COL.weld, wob);
+        else { [yw0 - aw, yw1].forEach(y0 => sc.box(X(0), X(aw), y0, y0 + aw, td, h - tg, COL.weld, wob)); if (w.spoiny === 'obwodowe' && sec.kind !== 'RHS') { const af = U.num(w.af, 6); [[h, af], [h - tg - af, af], [td, af], [-af, af]].forEach(([z0, t]) => sc.box(X(0), X(af), ywc - bg / 2, ywc + bg / 2, z0, z0 + t, COL.weld, wob)); } }
+      }
+      return;
+    }
+    // oparcie (płyta / mur / beton / element stalowy) – także podpory pośrednie
+    const lp = w.typ === 'oparcie' ? U.num(w.lp, 150) : Math.max(100, U.num((S.podpory[i] || {}).ss, 100)), bp = w.typ === 'oparcie' ? U.num(w.bp, 200) : bd + 60;
+    let zb = 0;
+    if (w.typ === 'oparcie' && w.podloze !== 'stal') { const tp = U.num(w.tp, 15); sc.box(p.x - lp / 2, p.x + lp / 2, ywc - bp / 2, ywc + bp / 2, -tp, 0, COL.plate, ob); zb = -tp; }
+    if (w.typ === 'oparcie' && w.podloze !== 'stal') sc.box(p.x - lp / 2 - 120, p.x + lp / 2 + 120, ywc - bp / 2 - 150, ywc + bp / 2 + 150, zb - 320, zb, w.podloze === 'mur' ? COL.mur : COL.conc, ob);
+    else { const bf2 = 160, hz = 260; sc.box(p.x - bf2 / 2, p.x + bf2 / 2, ywc - 500, ywc + 500, -12, 0, COL.col, ob, 1, 1); sc.box(p.x - 4, p.x + 4, ywc - 500, ywc + 500, -hz + 12, -12, COL.col, ob); sc.box(p.x - bf2 / 2, p.x + bf2 / 2, ywc - 500, ywc + 500, -hz, -hz + 12, COL.col, ob); }
+  });
+  // podpory montażowe
+  md.tmp.forEach(t => { const ob = sc.o(`Podpora montażowa ${t.id} – x = ${fmt(t.x / 1000, 2)} m, usuwana po etapie ${t.do + 1}`, () => A.stagesPopup(), { kind: 'tmp', x: t.x }); sc.box(t.x - 50, t.x + 50, ywc - 50, ywc + 50, -900, 0, COL.tmp, ob, 0.75); });
+  // stężenia boczne
+  (md.stez || []).forEach(z => {
+    const zz = z.wys === 'pas_d' ? td / 2 : z.wys === 'srodek' ? h / 2 : h - tg / 2;
+    const ob = sc.o(`Stężenie ${z.typ} x = ${fmt(z.x / 1000, 2)} m (${z.wys === 'pas_d' ? 'pas dolny' : z.wys === 'srodek' ? 'środek ścinania' : 'pas górny'})`, () => A.bracePopup(z.src === 'g' ? null : z.src), { kind: 'brace', x: z.x });
+    sc.box(z.x - 25, z.x + 25, ywc + bg / 2, ywc + bg / 2 + 700, zz - 25, zz + 25, COL.brace, ob);
+    sc.box(z.x - 25, z.x + 25, ywc - bg / 2 - 700, ywc - bg / 2, zz - 25, zz + 25, COL.brace, ob);
+  });
+  // płyta stropowa (stężenie ciągłe pasa górnego)
+  if (opts.slab && md.ciagle && md.ciagle.pasG) { const ob = sc.o('Płyta stropowa / poszycie – stężenie ciągłe pasa górnego', () => A.bracePopup(), { kind: 'slab' }); sc.box(0, L, ywc - Math.max(900, 3 * bg), ywc + Math.max(900, 3 * bg), h, h + 100, COL.slab, ob, 0.3, Math.max(4, Math.round(nseg / 2))); }
+  // styki montażowe
+  (R.styki || []).forEach((q, j) => {
+    const o = q.o, s2 = S.styki[j] || {}, x0 = q.x;
+    const ob = sc.o(`Styk ${q.id} – x = ${fmt(x0 / 1000, 2)} m – ${BS.W.STYKI[s2.typ] || ''}`, () => A.jointDesigner({ styk: j }), { kind: 'splice', x: x0 });
+    if (s2.typ === 'spawany' || !o || !o.geom) { sc.box(x0 - 2, x0 + 2, sec.ymin - 1, sec.ymax + 1, -1, h + 1, COL.weld, ob); return; }
+    const g = o.geom, B = o.B, Lf = g.Lf, Lw = g.Lw;
+    sc.box(x0 - Lf / 2, x0 + Lf / 2, ywc - g.bfo / 2, ywc + g.bfo / 2, h, h + g.tfo, COL.cover, ob);
+    sc.box(x0 - Lf / 2, x0 + Lf / 2, ywc - g.bfo / 2, ywc + g.bfo / 2, -g.tfo, 0, COL.cover, ob);
+    if (g.tfi > 0) [-1, 1].forEach(k => { const ya = ywc + k * (tw / 2 + (sec.r || 0)), yb = ya + k * g.bfi; sc.box(x0 - Lf / 2, x0 + Lf / 2, ya, yb, h - tg - g.tfi, h - tg, COL.cover, ob); sc.box(x0 - Lf / 2, x0 + Lf / 2, ya, yb, td, td + g.tfi, COL.cover, ob); });
+    const zw0 = (h - g.hpw) / 2;
+    sc.box(x0 - Lw / 2, x0 + Lw / 2, yw1, yw1 + g.tpw, zw0, zw0 + g.hpw, COL.cover, ob);
+    sc.box(x0 - Lw / 2, x0 + Lw / 2, yw0 - g.tpw, yw0, zw0, zw0 + g.hpw, COL.cover, ob);
+    for (let k = 0; k < g.nf; k++) [-1, 1].forEach(sd => { const x = x0 + sd * (g.gap / 2 + g.ef + k * g.p1f); [-1, 1].forEach(e => { const y = ywc + e * g.gf / 2; sc.bolt([x, y, h + g.tfo], [x, y, h - tg - (g.tfi || 0)], B, ob); sc.bolt([x, y, -g.tfo], [x, y, td + (g.tfi || 0)], B, ob); }); });
+    (o.bolts || []).forEach(b => [-1, 1].forEach(sd => { const x = x0 + sd * b.x, z = zw0 + g.hpw - b.z; sc.bolt([x, yw0 - g.tpw, z], [x, yw1 + g.tpw, z], B, ob); }));
+  });
+  sc.L = L; sc.h = h; sc.ywc = ywc; sc.bmax = Math.max(bg, bd);
+  return sc;
+}
+
+/* ---------------------------------------------------------- kamera i rysowanie */
+function camFit(sc, focus) {
+  const L = sc.L, h = sc.h;
+  if (focus === null || focus === undefined) return { t: [L / 2, sc.ywc, h / 2], yaw: -1.05, pitch: 0.42, d: Math.max(L * 0.85, 6 * h), fov: 0.62 };
+  return { t: [focus, sc.ywc, h / 2], yaw: focus < L / 2 ? -0.75 : -2.4, pitch: 0.38, d: Math.max(5 * h, 4 * sc.bmax, 1300), fov: 0.62 };
+}
+function eyeOf(c) { return add(c.t, [c.d * Math.cos(c.pitch) * Math.cos(c.yaw), c.d * Math.cos(c.pitch) * Math.sin(c.yaw), c.d * Math.sin(c.pitch)]); }
+function render(st) {
+  const { cv, sc, hov } = st, ctx = cv.getContext('2d'), dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const css = getComputedStyle(cv), bgc = css.getPropertyValue('--panel').trim() || '#ffffff', ink = css.getPropertyValue('--ink').trim() || '#1b2230';
+  ctx.fillStyle = bgc; ctx.fillRect(0, 0, W, H);
+  const c = cam, eye = eyeOf(c), fw = norm(sub(c.t, eye)), rt = norm(cross(fw, [0, 0, 1])), up = cross(rt, fw), F = (H / 2) / Math.tan(c.fov / 2), cx = W / 2, cy = H / 2, near = 20;
+  const L0 = norm(add(add(mul(rt, -0.45), mul(up, 0.8)), mul(fw, -0.6)));
+  const pr = (p) => { const d = sub(p, eye), z = dot(d, fw); return [cx + F * dot(d, rt) / z, cy - F * dot(d, up) / z, z]; };
+  const list = [];
+  sc.f.forEach((f, k) => {
+    const cen = f.p.reduce((a, p) => add(a, p), [0, 0, 0]).map(v => v / f.p.length);
+    if (dot(f.n, sub(eye, cen)) <= 0 && f.a >= 1) return;            // ściana odwrócona
+    const q = f.p.map(pr); if (q.some(v => v[2] < near)) return;
+    const depth = q.reduce((a, v) => a + v[2], 0) / q.length;
+    list.push({ k, q, depth, hq: f.hole ? f.hole.map(r => r.map(pr)) : null });
+  });
+  list.sort((a, b) => b.depth - a.depth);
+  const paths = [];
+  list.forEach(it => {
+    const f = sc.f[it.k], n = dot(f.n, sub(eye, f.p[0])) < 0 ? mul(f.n, -1) : f.n;
+    const lit = 0.42 + 0.58 * Math.max(0, dot(n, L0)) + 0.08 * Math.max(0, n[2]);
+    const hl = hov !== null && hov === f.ob, col = f.col.map(v => Math.min(255, Math.round(v * lit + (hl ? 45 : 0))));
+    const p2 = new Path2D(); it.q.forEach((v, i) => (i ? p2.lineTo(v[0], v[1]) : p2.moveTo(v[0], v[1]))); p2.closePath();
+    if (it.hq) it.hq.forEach(r => { r.forEach((v, i) => (i ? p2.lineTo(v[0], v[1]) : p2.moveTo(v[0], v[1]))); p2.closePath(); });
+    ctx.globalAlpha = f.a;
+    const rgb = `rgb(${hl ? Math.max(0, col[0] - 40) : col[0]},${col[1]},${hl ? Math.min(255, col[2] + 40) : col[2]})`;
+    ctx.fillStyle = rgb; ctx.fill(p2, 'evenodd');
+    if (f.a >= 1) { ctx.strokeStyle = rgb; ctx.lineWidth = 1.1; ctx.stroke(p2); }
+    ctx.beginPath();
+    it.q.forEach((v, i) => { if (!f.e[i]) return; const w2 = it.q[(i + 1) % it.q.length]; ctx.moveTo(v[0], v[1]); ctx.lineTo(w2[0], w2[1]); });
+    if (it.hq) it.hq.forEach(r => r.forEach((v, i) => { const w2 = r[(i + 1) % r.length]; ctx.moveTo(v[0], v[1]); ctx.lineTo(w2[0], w2[1]); }));
+    ctx.strokeStyle = hl ? 'rgba(29,91,184,0.95)' : 'rgba(20,26,38,0.55)'; ctx.lineWidth = hl ? 1.4 : 0.8; ctx.stroke();
+    ctx.globalAlpha = 1;
+    paths.push({ p2, ob: f.ob, a: f.a });
+  });
+  st.paths = paths;
+  // osie
+  const ax = [[1, 0, 0, 'x', '#c0262d'], [0, 1, 0, 'y', '#1d7f3c'], [0, 0, 1, 'z', '#1d5bb8']], o2 = [46, H - 40];
+  ax.forEach(([x, y, z, l, cc]) => { const v = [dot([x, y, z], rt), dot([x, y, z], up)]; ctx.strokeStyle = cc; ctx.fillStyle = cc; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(o2[0], o2[1]); ctx.lineTo(o2[0] + 26 * v[0], o2[1] - 26 * v[1]); ctx.stroke(); ctx.font = '11px sans-serif'; ctx.fillText(l, o2[0] + 31 * v[0] - 3, o2[1] - 31 * v[1] + 4); });
+  ctx.fillStyle = ink; ctx.globalAlpha = 0.55; ctx.font = '11px sans-serif'; ctx.fillText(`${sc.f.length} ścian · ${list.length} widocznych`, W - 150, H - 10); ctx.globalAlpha = 1;
+}
+
+/* ---------------------------------------------------------- osadzenie w zakładce */
+V3.mount = function (host, S, R) {
+  if (!host || !R || !R.md || !R.sec) return;
+  const sc = build(S, R);
+  if (!cam || cam.L !== sc.L || cam.h !== sc.h) { cam = camFit(sc); cam.L = sc.L; cam.h = sc.h; }
+  const md = R.md;
+  const views = [['all', 'Widok ogólny']].concat(md.sup.map((p, i) => [`s${i}`, `Podpora ${p.id}`])).concat((R.styki || []).map((q, j) => [`t${j}`, `Styk ${q.id}`]));
+  host.innerHTML = `<div class="v3bar"><span class="segsw sm">${views.map(([k, l]) => `<button type="button" data-v3="${k}">${esc(l)}</button>`).join('')}</span><span class="segsw sm">${[['iso', 'Izometria'], ['side', 'Z boku'], ['top', 'Z góry'], ['end', 'Od czoła']].map(([k, l]) => `<button type="button" data-v3d="${k}">${l}</button>`).join('')}</span>
+    <label class="chk sm"><input type="checkbox" data-v3o="slab" ${opts.slab ? 'checked' : ''}><span>płyta / poszycie</span></label><label class="chk sm"><input type="checkbox" data-v3o="sup" ${opts.sup ? 'checked' : ''}><span>elementy podpierające</span></label><label class="chk sm"><input type="checkbox" data-v3o="xray" ${opts.xray ? 'checked' : ''}><span>belka przezroczysta</span></label></div>
+    <div class="v3wrap"><canvas class="v3cv" tabindex="0" aria-label="Widok 3D belki"></canvas><div class="v3tip" style="display:none"></div></div>`;
+  const cv = host.querySelector('canvas'), tip = host.querySelector('.v3tip'), st = { cv, sc, hov: null, paths: [] };
+  let raf = 0; const draw = () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; render(st); }); };
+  // wybór: najpierw elementy nieprzezroczyste (płyta / belka przezroczysta nie zasłaniają połączeń)
+  const pick = (x, y) => { const ctx = cv.getContext('2d'), dpr = window.devicePixelRatio || 1; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); for (const pass of [1, 0]) for (let i = st.paths.length - 1; i >= 0; i--) { const q = st.paths[i]; if (pass && q.a < 1) continue; if (ctx.isPointInPath(q.p2, x * dpr, y * dpr)) return q.ob; } return null; };
+  let drag = null;
+  const touches = new Map(); let pinch = null;
+  cv.addEventListener('pointerdown', e => { cv.setPointerCapture(e.pointerId); touches.set(e.pointerId, [e.clientX, e.clientY]);
+    if (touches.size === 2) { const [a, b2] = [...touches.values()]; pinch = { d0: Math.hypot(a[0] - b2[0], a[1] - b2[1]), cd: cam.d }; drag = null; return; }
+    drag = { x: e.clientX, y: e.clientY, b: e.button, sh: e.shiftKey, moved: false, c0: Object.assign({}, cam, { t: cam.t.slice() }) }; });
+  const endTouch = (e) => { touches.delete(e.pointerId); if (touches.size < 2) pinch = null; };
+  cv.addEventListener('pointercancel', endTouch);
+  cv.addEventListener('pointermove', e => {
+    const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    if (touches.has(e.pointerId)) touches.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pinch && touches.size === 2) { const [a, b2] = [...touches.values()]; cam.d = U.clamp(pinch.cd * pinch.d0 / Math.max(10, Math.hypot(a[0] - b2[0], a[1] - b2[1])), 150, 40 * Math.max(sc.L, 1000)); draw(); return; }
+    if (drag) {
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.hypot(dx, dy) > 3) drag.moved = true;
+      if (drag.b === 2 || drag.sh) { const eye = eyeOf(drag.c0), fw = norm(sub(drag.c0.t, eye)), rt = norm(cross(fw, [0, 0, 1])), up = cross(rt, fw), k = drag.c0.d * Math.tan(cam.fov / 2) * 2 / cv.clientHeight; cam.t = add(drag.c0.t, add(mul(rt, -dx * k), mul(up, dy * k))); }
+      else { cam.yaw = drag.c0.yaw - dx * 0.008; cam.pitch = U.clamp(drag.c0.pitch + dy * 0.008, -1.45, 1.45); }
+      tip.style.display = 'none'; draw(); return;
+    }
+    const ob = pick(x, y);
+    if (ob !== st.hov) { st.hov = ob; draw(); }
+    if (ob !== null) { tip.textContent = sc.obj[ob].name + ' – kliknij, aby zmienić'; tip.style.display = 'block'; tip.style.left = Math.min(x + 14, cv.clientWidth - 260) + 'px'; tip.style.top = (y + 16) + 'px'; cv.style.cursor = 'pointer'; }
+    else { tip.style.display = 'none'; cv.style.cursor = 'grab'; }
+  });
+  cv.addEventListener('pointerup', e => { endTouch(e); const d = drag; drag = null; if (!d || d.moved || d.b !== 0) return; const r = cv.getBoundingClientRect(), ob = pick(e.clientX - r.left, e.clientY - r.top); if (ob !== null && sc.obj[ob].act) sc.obj[ob].act(); });
+  cv.addEventListener('pointerleave', () => { if (st.hov !== null) { st.hov = null; draw(); } tip.style.display = 'none'; });
+  cv.addEventListener('contextmenu', e => e.preventDefault());
+  cv.addEventListener('wheel', e => { e.preventDefault(); cam.d = U.clamp(cam.d * Math.exp(e.deltaY * 0.0012), 150, 40 * Math.max(sc.L, 1000)); draw(); }, { passive: false });
+  cv.addEventListener('dblclick', () => { cam = Object.assign(camFit(sc), { L: sc.L, h: sc.h }); draw(); });
+  host.querySelectorAll('[data-v3]').forEach(b => b.addEventListener('click', () => {
+    const k = b.dataset.v3; let x = null;
+    if (k[0] === 's') x = md.sup[+k.slice(1)].x; else if (k[0] === 't') x = (R.styki[+k.slice(1)] || {}).x;
+    cam = Object.assign(camFit(sc, x), { L: sc.L, h: sc.h }); draw();
+  }));
+  host.querySelectorAll('[data-v3d]').forEach(b => b.addEventListener('click', () => {
+    const k = b.dataset.v3d; if (k === 'iso') { cam.yaw = -1.05; cam.pitch = 0.42; } else if (k === 'side') { cam.yaw = -Math.PI / 2; cam.pitch = 0.02; } else if (k === 'top') { cam.yaw = -Math.PI / 2; cam.pitch = 1.45; } else { cam.yaw = Math.PI; cam.pitch = 0.08; } draw();
+  }));
+  host.querySelectorAll('[data-v3o]').forEach(cb => cb.addEventListener('change', () => { opts[cb.dataset.v3o] = cb.checked; try { localStorage.setItem('bs.v3', JSON.stringify(opts)); } catch (e) { /* */ } V3.mount(host, S, R); }));
+  if (window.ResizeObserver) { const ro = new ResizeObserver(() => draw()); ro.observe(cv); }
+  draw();
+  V3._st = st;
+};
+V3.build = build;
+})();
+
+</script>
 <script>/* src/ui/widoki.js */
 /* =====================================================================
    BelkaStal – zakładki wyników (jak w BelkaŻB): Przekrój i nośność
@@ -7956,7 +8426,7 @@ const miniChecks = (cs) => `<table class="kv" style="width:100%;margin-top:4px">
 V.elev = function (el) {
   if (!ok()) { el.innerHTML = head(el) + errBox(); bindHead(el); return; }
   const r = R(), md = r.md, sec = r.sec, W = W0(el), out = {};
-  let h = head(el) + `<div class="box elevbox"><h4>Belka – widok podłużny <span class="hint" style="margin-left:8px;font-weight:400">kliknij węzeł / oparcie lub styk – okno projektowania połączeń; stężenie, podporę montażową · Ctrl + kółko – powiększenie</span><button class="btn sm pri" id="veJd" type="button" style="float:right">Projektowanie połączeń…</button></h4><div class="elevwrap"><div class="zoomtgt">${D.elevation(S(), r, { W, out })}</div></div><div id="veInfo" class="hint" style="min-height:18px"></div></div>`;
+  let h = head(el) + `<div class="box v3box"><h4>Widok 3D <span class="hint" style="margin-left:8px;font-weight:400">przeciągnij – obrót · prawy przycisk lub Shift – przesunięcie · kółko – przybliżenie · dwuklik – widok ogólny · kliknij element – edycja</span></h4><div id="v3"></div></div><div class="box elevbox"><h4>Belka – widok podłużny <span class="hint" style="margin-left:8px;font-weight:400">kliknij węzeł / oparcie lub styk – okno projektowania połączeń; stężenie, podporę montażową · Ctrl + kółko – powiększenie</span><button class="btn sm pri" id="veJd" type="button" style="float:right">Projektowanie połączeń…</button></h4><div class="elevwrap"><div class="zoomtgt">${D.elevation(S(), r, { W, out })}</div></div><div id="veInfo" class="hint" style="min-height:18px"></div></div>`;
   h += '<div class="cards jcards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px">';
   (r.podpory || []).filter(p => !p.tymcz).forEach(p => {
     const i = md.sup.findIndex(q => q.id === p.id), w = (S().podpory[i] || {}).wezel || { typ: 'brak' };
@@ -7975,8 +8445,10 @@ V.elev = function (el) {
   el.innerHTML = h;
   bindHead(el); Q.themeSvgIn(el); Q.zoomApply(el); A.bindNref(el);
   const jd = $('#veJd', el); if (jd) jd.onclick = () => A.jointDesigner();
+  try { BS.V3.mount($('#v3', el), S(), r); } catch (e) { console.error(e); const v = $('#v3', el); if (v) v.innerHTML = `<p class="hint">Widok 3D niedostępny: ${esc(e.message)}</p>`; }
   $$('.jnt', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.jointDesigner({ sup: +g.dataset.sup }); }));
   $$('.sty', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.jointDesigner({ styk: +g.dataset.sty }); }));
+  $$('.stf', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.stiffPopup(g.dataset.stf === 'g' ? null : +g.dataset.stf); }));
   $$('[data-jsty]', el).forEach(c => c.addEventListener('click', () => A.jointDesigner({ styk: +c.dataset.jsty })));
   $$('[data-jadd2]', el).forEach(c => c.addEventListener('click', () => A.addSplice()));
   $$('.rst', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.bracePopup(g.dataset.rst === 'g' ? null : +g.dataset.rst); }));

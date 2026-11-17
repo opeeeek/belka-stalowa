@@ -122,6 +122,8 @@ D.scheme = function (S, R, o) {
     const act = z.od <= s, x = X(z.x), yy = z.wys === 'pas_d' ? yBeam + 6 : z.wys === 'srodek' ? yBeam : yBeam - 6, col = act ? '#1d5bb8' : '#9aa3b0';
     g += `<g class="${o.edit ? 'rst' : ''}" data-rst="${z.src}" opacity="${act ? 1 : 0.45}"><title>Stężenie ${z.typ} x = ${fmt(z.x / 1000, 2)} m (od etapu ${z.od + 1})</title><circle cx="${x}" cy="${yy}" r="6" fill="#ffffff" fill-opacity="0"/><circle cx="${x}" cy="${yy}" r="4.2" fill="#ffffff" stroke="${col}" stroke-width="1.6"/>${z.typ !== 'boczne' ? `<line x1="${x - 3}" y1="${yy - 3}" x2="${x + 3}" y2="${yy + 3}" stroke="${col}" stroke-width="1.4"/><line x1="${x - 3}" y1="${yy + 3}" x2="${x + 3}" y2="${yy - 3}" stroke="${col}" stroke-width="1.4"/>` : `<circle cx="${x}" cy="${yy}" r="1.4" fill="${col}"/>`}</g>`;
   });
+  // żebra poprzeczne środnika
+  (R.zebra || []).forEach(z => { const x = X(z.x); g += `<g class="${o.edit ? 'stf' : ''}" data-stf="${z.src}"${o.edit ? ' style="cursor:pointer"' : ''}><title>Żebro środnika x = ${fmt(z.x / 1000, 2)} m (${z.strona === 'jedna' ? 'jednostronne' : 'obustronne'} ${fmt(z.bs, 0)}×${fmt(z.ts, 0)} mm)</title><rect x="${x - 4}" y="${yBeam - 10}" width="8" height="20" fill="#ffffff" fill-opacity="0"/><line x1="${x}" y1="${yBeam - 7}" x2="${x}" y2="${yBeam + 7}" stroke="#b5651d" stroke-width="2"/></g>`; });
   // styki montażowe
   (S.styki || []).forEach((st2, j) => { const x = X(U.clamp(U.num(st2.x) * 1000, 0, L)); g += `<g class="${o.edit ? 'sty' : ''}" data-sty="${j}"${o.edit ? ' style="cursor:pointer"' : ''}><title>Styk montażowy S${j + 1} – x = ${fmt(U.num(st2.x), 2)} m</title><rect x="${x - 7}" y="${yBeam - 14}" width="14" height="28" fill="#ffffff" fill-opacity="0"/><line x1="${x - 2.5}" y1="${yBeam - 9}" x2="${x - 2.5}" y2="${yBeam + 9}" stroke="#b5651d" stroke-width="1.6"/><line x1="${x + 2.5}" y1="${yBeam - 9}" x2="${x + 2.5}" y2="${yBeam + 9}" stroke="#b5651d" stroke-width="1.6"/>${tx(x, yBeam - 12, 'S' + (j + 1), { fs: 9, w: 700, c: '#b5651d' })}</g>`; });
   // opis przekroju
@@ -433,8 +435,7 @@ D.elevation = function (S, R, o) {
   (md.stez || []).forEach(z => { const x = X(z.x); g += `<g class="rst" data-rst="${z.src}" style="cursor:pointer"><title>Stężenie ${z.typ} x = ${fmt(z.x / 1000, 2)} m</title><path d="M ${x - 6} ${yt - 14} L ${x + 6} ${yt - 14} L ${x} ${yt - 2} Z" fill="#1d5bb8"/><line x1="${x}" y1="${yt - 30}" x2="${x}" y2="${yt - 14}" stroke="#1d5bb8"/></g>`; });
   if ((md.ciagle || {}).pasG) g += `<line x1="${X(0)}" y1="${yt - 5}" x2="${X(L)}" y2="${yt - 5}" stroke="#1d5bb8" stroke-width="2" stroke-dasharray="3 3"/>`;
   // żebra pośrednie
-  const a = U.num((S.analiza || {}).zebraRozstaw) * 1000;
-  if (a > 0) for (let x = a; x < L - 1; x += a) g += `<line x1="${X(x)}" y1="${yt + tf}" x2="${X(x)}" y2="${yb - tfd}" stroke="#b5651d" stroke-width="1.5"/>`;
+  (R.zebra || []).forEach(z => { const x = X(z.x); g += `<g class="stf" data-stf="${z.src}" style="cursor:pointer"><title>Żebro środnika x = ${fmt(z.x / 1000, 2)} m – ${z.strona === 'jedna' ? 'jednostronne' : 'obustronne'} ${fmt(z.bs, 0)}×${fmt(z.ts, 0)} mm (kliknij, aby zmienić)</title><rect x="${x - 5}" y="${yt}" width="10" height="${hs}" fill="#ffffff" fill-opacity="0"/><line x1="${x}" y1="${yt + tf}" x2="${x}" y2="${yb - tfd}" stroke="#b5651d" stroke-width="2.2"/></g>`; });
   // wymiary
   let y = yb + 72;
   const xs = [0].concat(md.sup.map(p => p.x)).concat([L]).filter((v, i, arr) => arr.indexOf(v) === i).sort((p, q) => p - q);
