@@ -800,6 +800,10 @@ svg.elev .xend { cursor: ew-resize; } svg.elev .xend circle { stroke-width: 1.4;
 .xrep .ok { color: var(--ok); font-weight: 700; } .xrep .fail { color: var(--fail); font-weight: 700; } .xrep .warn { color: var(--warn); font-weight: 700; }
 .xrep .note { font-size: 11.5px; font-style: italic; color: var(--ink2); }
 .xrep .fig { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0; overflow-x: auto; }
+.jdes .roval { grid-column: span 1; font-size: 12.5px; color: var(--ink); padding: 4px 6px; background: var(--itembg); border: 1px dashed var(--line); border-radius: 5px; min-height: 28px; display: flex; align-items: center; gap: 6px; }
+.jdes .roval small { color: var(--ink3); }
+table.ctab td.tk input[disabled] { opacity: 1; }
+table.ctab td.tk input[data-tick] { accent-color: var(--ok); cursor: default; }
 </style>
 </head>
 <body>
@@ -3470,6 +3474,12 @@ function beamWeb(o, ctx, B, V, lay) {
     o.add('Belka', 'Środnik – ścinanie przekroju netto w linii śrub', 'PN-EN 1993-1-1 6.2.6; 1-8 3.10', V, Math.max(0, Av - nr * B.d0 * tw) * mat.fu / (s3 * g2), 'F', `A_v,net = A_v − n_r·d₀·t_w = ${f(Av, 0)} − ${nr}·${B.d0}·${f(tw)} mm²`);
   }
 }
+/* ---------------------------------------------------------- wysokość środnika w świetle (między zaokrągleniami lub do podcięć) */
+function webClear(sec, w) {
+  const r = sec.r || 0, dnt = U.num(w && w.dnt), dnb = U.num(w && w.dnb);
+  return sec.h - (dnt > 0 ? dnt : (sec.tg || 0) + r) - (dnb > 0 ? dnb : (sec.td || 0) + r);
+}
+W.webClear = webClear;
 // element podpierający
 function support(o, ctx, w, B, V, n, hp, extra) {
   const { ndp } = ctx, g2 = ndp.gM2, g0 = ndp.gM0, t = U.num(w.tsup, 0);
@@ -3497,7 +3507,7 @@ W.endPlate = function (ctx, w, F) {
   const { sec, mat, ndp } = ctx, g0 = ndp.gM0, g1 = ndp.gM1, g2 = ndp.gM2;
   const o = rec(); o.typ = 'blacha_czolowa';
   const B = W.bolt(w, ndp), nr = Math.max(1, Math.round(U.num(w.nr, 2))), n = 2 * nr;
-  const hp = U.num(w.hp), bp = U.num(w.bp), tp = U.num(w.tp), e1 = U.num(w.e1), p1 = U.num(w.p1), e2 = U.num(w.e2), p3 = U.num(w.p3), a = U.num(w.a);
+  const hp = U.num(w.hp), bp = U.num(w.bp), tp = U.num(w.tp), e1 = U.num(w.e1), p1 = U.num(w.p1), p3 = U.num(w.p3), a = U.num(w.a), e2 = bp > 0 ? (bp - p3) / 2 : U.num(w.e2), e1d = hp - e1 - (nr - 1) * p1;
   const pl = steel(w.gatP || mat.gatunek, tp, ndp), V = Math.abs(F.V), Nt = Math.max(0, U.num(F.Nt));
   o.B = B; o.pl = pl; o.n = n;
   // współrzędne śrub: x – od osi środnika, z – od górnej krawędzi blachy w dół
@@ -3545,14 +3555,15 @@ W.endPlate = function (ctx, w, F) {
   }
   // --- konstrukcja i ciągliwość
   spacing(o, 'blacha czołowa', B, tp, { e1, e2, p1: nr > 1 ? p1 : undefined, p2: p3, exp: w.exp });
+  o.dmin('blacha czołowa', 'otwory w obrysie blachy: e₁,dół = h_p − e₁ − (n_r − 1)·p₁ ≥ 1,2·d₀', e1d, 1.2 * B.d0);
+  o.dmin('blacha czołowa', 'otwór poza spoiną środnika: (p₃ − t_w)/2 − a√2 ≥ d₀/2', (p3 - sec.tw) / 2 - a * Math.SQRT2, B.d0 / 2);
   const tpMax = (pl.fy <= 275 ? 0.5 : 0.42) * B.dd * (B.cl === '10.9' ? 0.85 : 1);
   o.dmax('blacha czołowa', `t_p ≤ ${pl.fy <= 275 ? '0,5' : '0,42'}·d (zdolność do obrotu przegubu)`, tp, tpMax, 'zal');
   o.dmin('blacha czołowa', 'h_p ≥ 0,6·h_b (stężenie skrętne końca belki)', hp, 0.6 * sec.h, 'zal');
-  o.dmax('blacha czołowa', 'h_p ≤ h_w (blacha w obrysie środnika)', hp, w.pelna ? sec.h : sec.h - (sec.tg || 0) - (sec.td || 0) - 2 * (sec.r || 0), w.pelna ? 'max' : 'zal');
+  o.dmax('blacha czołowa', w.pelna ? 'h_p ≤ h (blacha w obrysie belki)' : 'h_p ≤ h − 2(t_f + r) (blacha w obrysie środnika)', hp, w.pelna ? sec.h : sec.h - (sec.tg || 0) - (sec.td || 0) - 2 * (sec.r || 0));
   o.dmin('blacha czołowa', 'odstęp śruby od spoiny (p₃ − t_w)/2 − a√2 ≥ 0,5·s (klucz)', (p3 - sec.tw) / 2 - a * Math.SQRT2, 0.5 * B.s, 'zal');
   o.dmax('blacha czołowa', 'b_p ≤ szerokość pasa belki + 10 mm', bp, Math.min(sec.bg || sec.b || 1e9, sec.bd || sec.b || 1e9) + 10, 'zal');
-  o.dmin('blacha czołowa', 'b_p ≥ p₃ + 2·e₂', bp + 1e-6, p3 + 2 * e2);
-  o.mass = 7.85e-6 * hp * bp * tp; o.nb = n; o.weldL = 2 * hp; o.geom = { hp, bp, tp, nr, e1, p1, e2, p3, a, pelna: !!w.pelna };
+  o.mass = 7.85e-6 * hp * bp * tp; o.nb = n; o.weldL = 2 * hp; o.geom = { hp, bp, tp, nr, e1, p1, e2, p3, a, e1d, pelna: !!w.pelna };
   return fin(o);
 };
 
@@ -3645,6 +3656,8 @@ W.finPlate = function (ctx, w, F) {
   }
   // --- konstrukcja
   spacing(o, 'blacha żebrowa', B, tp, { e1, e2, p1: nr > 1 ? p1 : undefined, p2: nc > 1 ? p2 : undefined, exp: w.exp });
+  o.dmin('blacha żebrowa', 'otwory w obrysie blachy: e₁,dół = h_p − e₁ − (n_r − 1)·p₁ ≥ 1,2·d₀', hp - e1 - (nr - 1) * p1, 1.2 * B.d0);
+  o.dmax('blacha żebrowa', 'h_p ≤ wysokość środnika w świetle (otwory w środniku belki)', hp, webClear(sec, w));
   spacing(o, 'środnik belki', B, sec.tw, { e2: e2b, p1: undefined });
   o.dmax('blacha żebrowa', 't_p ≤ 0,5·d (ciągliwość – SCI)', tp, 0.5 * B.dd, 'zal');
   o.dmin('blacha żebrowa', 'e₂ ≥ 2·d (ciągliwość – SCI)', e2, 2 * B.dd, 'zal');
@@ -3709,12 +3722,15 @@ W.cleats = function (ctx, w, F) {
   // --- konstrukcja
   spacing(o, 'kątowniki (ramię na belce)', B, ta, { e1, e2: eb, p1: nr > 1 ? p1 : undefined, exp: w.exp });
   spacing(o, 'kątowniki (ramię na podporze)', B, ta, { e1, e2: es, p1: nr > 1 ? p1 : undefined });
+  o.dmin('kątowniki', 'otwory w obrysie kątowników: e₁,dół = h_p − e₁ − (n_r − 1)·p₁ ≥ 1,2·d₀', hp - e1 - (nr - 1) * p1, 1.2 * B.d0);
+  o.dmin('kątowniki', 'otwór poza zaokrągleniem: g_b ≥ t_a + r + d₀/2', gb, ta + ra + B.d0 / 2);
+  o.dmin('kątowniki', 'otwór poza zaokrągleniem: g_s ≥ t_a + r + d₀/2', gs, ta + ra + B.d0 / 2);
   o.dmin('środnik belki', 'e₂,b = g_b − c ≥ 1,2·d₀', e2b, 1.2 * B.d0);
   o.dmin('kątowniki', 'g_b ≥ t_a + r + 0,5·s (dostęp klucza)', gb, ta + ra + 0.5 * B.s, 'zal');
   o.dmin('kątowniki', 'g_s ≥ t_a + r + 0,5·s (dostęp klucza)', gs, ta + ra + 0.5 * B.s, 'zal');
   o.dmax('kątowniki', 't_a ≤ 0,5·d (ciągliwość)', ta, 0.5 * B.dd, 'zal');
   o.dmin('kątowniki', 'h_p ≥ 0,6·h_b (stężenie skrętne)', hp, 0.6 * sec.h, 'zal');
-  o.dmax('kątowniki', 'h_p ≤ h − 2(t_f + r) (w obrysie środnika)', hp, sec.h - (sec.tg || 0) - (sec.td || 0) - 2 * (sec.r || 0), 'zal');
+  o.dmax('kątowniki', 'h_p ≤ wysokość środnika w świetle (otwory w środniku belki)', hp, webClear(sec, w));
   const mpm = (P.props({ typ: 'kat', seria: ser, nr: w.L }) || {}).masa || 0;
   o.mass = 2 * mpm * hp / 1000; o.nb = nr + ns; o.weldL = 0;
   o.geom = { hp, nr, e1, p1, gb, gs, gap, lb, ls, ta, ra, e2b, eb, es };
@@ -3812,6 +3828,9 @@ W.splice = function (ctx, s, F) {
   spacing(o, 'nakładki pasa', B, tfo, { e1: e1f, e2: e2o, p1: nf > 1 ? p1f : undefined, p2: gf, exp: s.exp });
   o.dmin('pas belki', 'e_f (koniec belki) ≥ 1,2·d₀', ef, 1.2 * B.d0); o.dmin('pas belki', 'e₂ ≥ 1,2·d₀', e2f, 1.2 * B.d0);
   if (tfi > 0) o.dmax('nakładki wewnętrzne', 'b_fi ≤ (b_f − t_w − 2r)/2', bfi, (bf - tw - 2 * r) / 2);
+  o.dmin('pas belki', 'otwór poza zaokrągleniem środnika: g_f/2 ≥ t_w/2 + r + d₀/2', gf / 2, tw / 2 + r + B.d0 / 2);
+  o.dmax('nakładki pasa', 'otwory w obrysie nakładki zewnętrznej: g_f ≤ b_fo − 2·1,2·d₀', gf, bfo - 2.4 * B.d0);
+  if (tfi > 0) { const yi0 = tw / 2 + r, yi1 = yi0 + bfi; o.dmin('nakładki wewnętrzne', 'otwór w obrysie nakładki: g_f/2 − (t_w/2 + r) ≥ 1,2·d₀', gf / 2 - yi0, 1.2 * B.d0); o.dmin('nakładki wewnętrzne', 'otwór w obrysie nakładki: (t_w/2 + r + b_fi) − g_f/2 ≥ 1,2·d₀', yi1 - gf / 2, 1.2 * B.d0); }
   // ---------------- środnik
   const pts = []; let id = 0;
   for (let i = 0; i < nw; i++) for (let j = 0; j < ncw; j++) pts.push({ id: ++id, x: gap / 2 + ew + j * p2w, z: e1w + i * p1w, r: i, c: j });
@@ -3832,7 +3851,7 @@ W.splice = function (ctx, s, F) {
   spacing(o, 'nakładki środnika', B, tpw, { e1: e1w, e2: e2w, p1: nw > 1 ? p1w : undefined, p2: ncw > 1 ? p2w : undefined, exp: s.exp });
   o.dmin('środnik belki', 'e_w (koniec belki) ≥ 1,2·d₀', ew, 1.2 * B.d0);
   o.dmax('nakładki środnika', 'h_p ≤ h − 2(t_f + r) − 10', hpw, h - 2 * (tf + r) - 10);
-  o.dmin('nakładki środnika', 'h_p = 2e₁ + (n_w − 1)p₁', hpw + 1e-6, 2 * e1w + (nw - 1) * p1w);
+  o.dmin('nakładki środnika', 'otwory w obrysie nakładki: h_p − e₁ − (n_w − 1)·p₁ ≥ 1,2·d₀', hpw - e1w - (nw - 1) * p1w, 1.2 * B.d0);
   const Lf = 2 * (e1f + (nf - 1) * p1f + ef) + gap, Lw2 = 2 * (ew + (ncw - 1) * p2w + e2w) + gap;
   o.mass = 7.85e-6 * (2 * (Ao + Ai) * Lf + 2 * hpw * tpw * Lw2); o.nb = 2 * (2 * nb + nw * ncw); o.weldL = 0;
   o.geom = { tfo, bfo, tfi, bfi, nf, gf, e1f, p1f, ef, gap, tpw, hpw, nw, ncw, p1w, p2w, e1w, ew, e2w, Lf, Lw: Lw2 };
@@ -3926,8 +3945,8 @@ W.autoSplice = function (ctx, s0, F, eta) {
 /* ---------------------------------------------------------- wartości domyślne */
 W.defaults = function (typ, sec) {
   const h = (sec && sec.h) || 300, hw = sec ? sec.h - (sec.tg || 0) - (sec.td || 0) - 2 * (sec.r || 0) : 250, tw = (sec && sec.tw) || 7;
-  const hp = Math.max(100, Math.min(hw - 10, Math.ceil(0.62 * h / 10) * 10));
-  const nr = Math.max(1, Math.min(8, Math.floor((hp - 80) / 70) + 1)), p1 = nr > 1 ? Math.floor((hp - 80) / (nr - 1) / 5) * 5 : 70;
+  let nr = Math.max(1, Math.min(8, Math.round((0.62 * h - 80) / 70) + 1)); while (nr > 1 && 80 + (nr - 1) * 70 > hw) nr--;
+  const p1 = 70, hp = 80 + (nr - 1) * p1;
   const com = { gatP: 'S235', d: 'M20', kl: '8.8', gwint: true, otw: 'normalne', sprezane: false, kat: 'A', pow: 'B', sup: 'pas_slupa', tsup: 12, supGat: 'S235', Nt: 0, dnt: 0, dnb: 0, ln: 0, e1b: 60 };
   if (typ === 'blacha_czolowa') return Object.assign(com, { d: 'M16', hp, bp: 150, tp: 10, nr, e1: 40, p1, e2: 30, p3: 90, a: 5, pelna: false });
   if (typ === 'blacha_zebrowa') return Object.assign(com, { hp, tp: 10, nr, n: nr, nc: 1, e1: 40, p1, e2: 50, p2: 60, z: 60, e2b: 50, a: 6 });
@@ -4211,6 +4230,7 @@ J.normalize = function (st) {
   while (o.podpory.length < nS) o.podpory.push({ typ: 'przegub', ltb: 'widelkowe', ss: 100, c: 0, wezel: { typ: 'brak' } });
   ['obciazenia', 'etapy', 'stezenia', 'podporyTymczasowe', 'styki'].forEach(k => { if (!Array.isArray(o[k])) o[k] = []; });
   if (!o.etapy.length) o.etapy = [{ id: 'E1', nazwa: 'Eksploatacja', typ: 'eksploatacja', opis: '' }];
+  if (/^c[234]$/.test(o.schemat)) o.schemat = 'ciagla';
   o.format = BS.FORMAT;
   return o;
 };
@@ -4706,9 +4726,7 @@ J.SCHEMATY = [
   { id: 'utwutw', n: 'Obustronnie utwierdzona', d: 'oba końce sztywne', przesla: 1, sup: ['utwierdzenie', 'utwierdzenie'] },
   { id: 'wspP', n: 'Jednoprzęsłowa ze wspornikiem', d: 'przęsło + wspornik prawy', przesla: 1, wspP: true, sup: ['przegub', 'przegub'] },
   { id: 'wsp2', n: 'Jednoprzęsłowa z dwoma wspornikami', d: 'wsporniki z obu stron przęsła', przesla: 1, wspL: true, wspP: true, sup: ['przegub', 'przegub'] },
-  { id: 'c2', n: 'Belka ciągła dwuprzęsłowa', d: 'np. płatew, podciąg na 3 podporach', przesla: 2, sup: ['przegub', 'przegub', 'przegub'] },
-  { id: 'c3', n: 'Belka ciągła trzyprzęsłowa', d: '4 podpory', przesla: 3, sup: ['przegub', 'przegub', 'przegub', 'przegub'] },
-  { id: 'c4', n: 'Belka ciągła czteroprzęsłowa', d: '5 podpór', przesla: 4, sup: ['przegub', 'przegub', 'przegub', 'przegub', 'przegub'] },
+  { id: 'ciagla', n: 'Belka ciągła', d: 'liczba przęseł – pole „Liczba przęseł” (np. płatew, podciąg)', przesla: 3, ciagla: true, sup: ['przegub', 'przegub', 'przegub', 'przegub'] },
   { id: 'montaz', n: 'Belka z podporą montażową', d: 'etap 1 – podpora tymczasowa w środku, etap 2 – po jej usunięciu', przesla: 1, sup: ['przegub', 'przegub'], tmp: true },
   { id: 'stropowa', n: 'Belka stropowa z etapem montażu', d: 'montaż bez stężenia pasa górnego, eksploatacja – pas górny stężony płytą', przesla: 1, sup: ['przegub', 'przegub'], stages: true }
 ];
@@ -4716,12 +4734,14 @@ J.applyScheme = function (st, id) {
   const sc = J.SCHEMATY.find(q => q.id === id); if (!sc) return st;
   const g = st.geom || (st.geom = {});
   const L0 = U.num((g.przesla || [])[0], 6) || 6;
-  g.przesla = Array.from({ length: sc.przesla }, (_, i) => U.num((g.przesla || [])[i], L0) || L0);
+  const nP = sc.ciagla ? Math.max(2, (g.przesla || []).length) : sc.przesla;
+  g.przesla = Array.from({ length: nP }, (_, i) => U.num((g.przesla || [])[i], L0) || L0);
   g.wspL = sc.wspL ? (U.num(g.wspL) || Math.max(1, Math.round(L0 / 4 * 2) / 2)) : 0;
   g.wspP = sc.wspP ? (U.num(g.wspP) || (sc.przesla ? Math.max(1, Math.round(L0 / 4 * 2) / 2) : L0 / 2)) : 0;
   if (!sc.przesla && sc.wspP) g.wspP = U.num(g.wspP) || 2;
   const old = st.podpory || [];
-  st.podpory = sc.sup.map((t, i) => Object.assign({ ss: 100, c: 0, wezel: { typ: 'brak' } }, old[i] || {}, { typ: t, ltb: t === 'utwierdzenie' ? 'pelne' : 'widelkowe' }));
+  const sup = sc.ciagla ? Array.from({ length: nP + 1 }, () => 'przegub') : sc.sup;
+  st.podpory = sup.map((t, i) => Object.assign({ ss: 100, c: 0, wezel: { typ: 'brak' } }, old[i] || {}, { typ: t, ltb: t === 'utwierdzenie' ? 'pelne' : 'widelkowe' }));
   st.schemat = id;
   if (sc.tmp) {
     if (!st.etapy || st.etapy.length < 2) st.etapy = [{ id: 'E1', nazwa: 'Montaż – na podporze tymczasowej', typ: 'montaz', opis: '' }, { id: 'E2', nazwa: 'Eksploatacja', typ: 'eksploatacja', opis: '' }];
@@ -5084,8 +5104,8 @@ D.scheme = function (S, R, o) {
   const legend = o.legend || [], out = o.out || {};
   // pasma obciążeń
   const bands = [], pts = [];
-  const sw = (S.ciezarWlasny || {}).auto !== false && R.sec;
-  if (sw) bands.push({ li: 'sw', col: KC.sw, x0: 0, x1: L, q0: R.sec.gk * (1 + U.num(S.ciezarWlasny.dodatek) / 100), q1: null, lab: `G₀ ciężar własny: q = ${fmt(R.sec.gk * (1 + U.num(S.ciezarWlasny.dodatek) / 100), 2)} kN/m`, off: false, inStage: true });
+  const swOn = (S.ciezarWlasny || {}).auto !== false;
+  if (R.sec) bands.push({ li: 'sw', col: KC.sw, x0: 0, x1: L, q0: R.sec.gk * (1 + U.num(S.ciezarWlasny.dodatek) / 100), q1: null, lab: `G₀ ciężar własny: q = ${fmt(R.sec.gk * (1 + U.num(S.ciezarWlasny.dodatek) / 100), 2)} kN/m${swOn ? '' : ' (pominięty)'}`, off: !swOn, inStage: true });
   (S.obciazenia || []).forEach((c, li) => {
     const st = RODZ()[c.rodzaj] || {}, et = U.clamp(Math.round(U.num(c.etap, md.nE - 1)), 0, md.nE - 1);
     const inStage = st.stale ? et <= s : et === s;
@@ -6002,9 +6022,7 @@ RP.build = function (S, R, opt) {
   h += line(`<b>Razem stal ${f(to.total, 1)} kg</b>${Object.keys(to.bolts).length ? `; śruby: ${Object.keys(to.bolts).map(k => `${to.bolts[k]} × ${esc(k)}`).join(', ')}` : ''}${to.weld ? `; spoiny pachwinowe ok. ${f(to.weld / 1000, 2)} m` : ''}`);
   // ---------------------------------------------------------- zestawienie sprawdzeń
   h += H2('Zestawienie sprawdzeń');
-  const ticks = S.meta.ticks || {}, anyT = R.checks.some(c => ticks[c.id]);
-  const list = anyT ? R.checks.filter(c => ticks[c.id]) : R.checks;
-  if (!anyT) h += '<p class="note">Wszystkie sprawdzenia (w zakładce Podsumowanie można odhaczyć sprawdzenia przedstawiane w raporcie).</p>';
+  const list = R.checks;
   let grp = '';
   list.forEach(c => {
     if (c.grp !== grp) { grp = c.grp; h += `<h3>${esc(grp)}</h3>`; }
@@ -6355,7 +6373,6 @@ const serieOf = (t) => P.RODZAJE[t].serie.map(k => [k, P.SERIA_N[k] || k]);
 const GROUPS = [
   { id: 'geo', title: 'Schemat statyczny i geometria', items: [
     { k: 'schemat', t: 'sel', l: 'Schemat statyczny', o: () => J.SCHEMATY.map(q => [q.id, q.n]).concat([['wlasny', 'własny (zmieniony na schemacie)']]), wide: true, re: true },
-    { t: 'html', h: () => `<div class="row wide"><span></span><button class="btn sm" data-act="schemes" type="button">Schematy typowe…</button></div>` },
     { t: 'spans' },
     { k: 'geom.wspL', t: 'num', l: 'Wspornik lewy', u: 'm', list: [0, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3], min: 0, re: true },
     { k: 'geom.wspP', t: 'num', l: 'Wspornik prawy', u: 'm', list: [0, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3], min: 0, re: true },
@@ -6492,11 +6509,11 @@ function connSummaryHTML() {
   let h = '<table class="kv" style="width:100%">';
   R.md.sup.forEach((p, i) => { const rp = (R.podpory || []).find(q => q.id === p.id) || { checks: [] }; h += row(`Podpora ${p.id}`, J.jointTxt((S.podpory[i] || {}).wezel || {}, R.sec), rp.checks, `data-cjs="${i}"`); });
   (S.styki || []).forEach((st2, j) => { const cs = R.checks.filter(c => c.id.indexOf(`S${j + 1}-`) === 0); h += row(`Styk S${j + 1}`, `x = ${fmt(U.num(st2.x), 2)} m – ${(BS.W.STYKI[st2.typ] || '')}`, cs, `data-cjt="${j}"`); });
-  return h + `</table><div class="row wide"><span></span><span><button class="btn sm pri" data-act="jdes" type="button">Projektowanie połączeń…</button> <button class="btn sm" data-act="addsplice" type="button">+ styk montażowy</button></span></div>`;
+  return h + `</table><div class="row wide"><span></span><span><button class="btn sm pri" data-act="jdes" type="button">Projektowanie połączeń…</button></span></div>`;
 }
 function loadMiniHTML() {
   const n = S.obciazenia.length, on = S.obciazenia.filter(o => o.aktywne !== false).length;
-  return `<div class="row wide"><span class="hint" style="margin:0">Przypadków obciążeń: <b>${n}</b>${n !== on ? ` (uwzględnionych ${on})` : ''}</span><button class="btn sm" data-act="loads" type="button">Obciążenia…</button></div>`;
+  return `<div class="row wide"><span class="hint" style="margin:0">Przypadków obciążeń: <b>${n}</b>${n !== on ? ` (uwzględnionych ${on})` : ''}</span></div>`;
 }
 function fatDetHTML() {
   const L = S.zmeczenie.detale || [];
@@ -6581,7 +6598,7 @@ function schemeOf() {
   if (n === 1 && wl && wp && allP) return 'wsp2';
   if (n === 1 && !wl && !wp && t[0] === 'utwierdzenie' && t[1] === 'przegub') return 'utwprz';
   if (n === 1 && !wl && !wp && t[0] === 'utwierdzenie' && t[1] === 'utwierdzenie') return 'utwutw';
-  if (n >= 2 && n <= 4 && !wl && !wp && allP) return 'c' + n;
+  if (n >= 2 && !wl && !wp && allP) return 'ciagla';
   return 'wlasny';
 }
 A.schemeOf = schemeOf;
@@ -6598,7 +6615,7 @@ function numInput(el, final) {
   const v = parseNum(raw);
   const bad = v === null || (min !== null && v < min) || (max !== null && v > max);
   el.classList.toggle('bad', bad);
-  if (bad) return;
+  if (bad) { if (final && v !== null) Q.toast(el.dataset.maxmsg && max !== null && v > max ? el.dataset.maxmsg.replace('{max}', showNum(max)) : `Dopuszczalny zakres: ${min !== null ? 'od ' + showNum(min) : ''}${max !== null ? ' do ' + showNum(max) : ''}`, 4500); return; }
   setP(S, el.dataset.k, v); onSet(el.dataset.k, v);
   if (final) el.value = showNum(v);
   changed(final && !!el.dataset.re);
@@ -6784,7 +6801,7 @@ function renderDataSide() {
     <div class="schsel">${sel.length ? `Zaznaczone: <b>${esc(sel.join(', '))}</b> · <button class="lnk" id="selClr" type="button">odznacz (Esc)</button>` : '<span class="mut">Lewy przycisk – zaznacz przęsło, prawy – menu (obciążenia, przekrój, stężenia, podpora…). Dwuklik na belce – węzeł w tym miejscu.</span>'}${stSw ? ` · ${stSw} <span class="mut">${esc(md.etapy[s].nazwa)}</span>` : ''}</div>
     <div class="schrow">${LEGW ? `<div class="ldleg" style="width:${LEGW}px">${legH}</div>` : ''}<div class="schemewrap"><div class="zoomtgt">${svg}${out.dgY ? `<div class="dgbar" style="top:${((out.dgY - 6) / out.H * 100).toFixed(2)}%">${dgSw}</div>` : ''}</div></div></div>${LEGW ? '' : `<div class="ldlegm">${legH}</div>`}${out.dgY ? '' : `<div style="text-align:center;margin:4px 0">${dgSw}</div>`}</div>`;
   h += `<div class="optchk">
-    <label class="chk sm"><input type="checkbox" data-ck="ciezarWlasny.auto" ${S.ciezarWlasny.auto !== false ? 'checked' : ''}><span>Uwzględnij ciężar własny belki (78,5 kN/m³)${S.ciezarWlasny.auto !== false ? ` + dodatek na połączenia <input class="txt sm" style="width:46px;height:22px" data-ckn="ciezarWlasny.dodatek" value="${esc(showNum(S.ciezarWlasny.dodatek))}"> %` : ''}</span></label>
+    <label class="chk sm"><input type="checkbox" data-ck="ciezarWlasny.auto" ${S.ciezarWlasny.auto !== false ? 'checked' : ''}><span>Uwzględnij ciężar własny belki (78,5 kN/m³) + dodatek na połączenia <input class="txt sm" style="width:46px;height:22px" data-ckn="ciezarWlasny.dodatek" value="${esc(showNum(S.ciezarWlasny.dodatek))}" ${S.ciezarWlasny.auto !== false ? '' : 'disabled'}> %</span></label>
     <label class="chk sm"><input type="checkbox" data-ck="stezenieCiagle.pasG" ${S.stezenieCiagle.pasG ? 'checked' : ''}><span>Pas górny stężony ciągle (płyta, blacha fałdowa)<small class="ophint">Zwichrzenie pasa górnego zablokowane od wskazanego etapu; przy momentach ujemnych ściskany pas dolny pozostaje niestężony.</small></span></label>
     <label class="chk sm"><input type="checkbox" data-ck="sgu.drgania" ${S.sgu.drgania !== false ? 'checked' : ''}><span>Sprawdzaj częstotliwość drgań własnych (f<sub>1</sub> ≥ f<sub>min</sub> = ${fmt(U.num(S.sgu.fmin, 3), 1)} Hz)</span></label>
     <div class="firerow"><label class="chk sm"><input type="checkbox" id="fireOn" ${S.pozar.aktywny ? 'checked' : ''}><span>Odporność ogniowa wg PN-EN 1993-1-2</span></label><select id="fireR" ${S.pozar.aktywny ? '' : 'disabled'}>${[15, 30, 45, 60, 90, 120, 180, 240].map(r => `<option value="${r}" ${U.num(S.pozar.R) === r ? 'selected' : ''}>R${r}</option>`).join('')}</select></div>${fireStatusHTML()}
@@ -6818,7 +6835,7 @@ function fireStatusHTML() {
 function loadSummaryHTML() {
   if (!R || !R.md) return '';
   const rows = [];
-  if (S.ciezarWlasny.auto !== false && R.sec) rows.push(`<tr><td><input type="checkbox" checked disabled class="ldon"> G₀</td><td>ciężar własny belki</td><td>stałe</td><td class="n">${fmt(R.sec.gk * (1 + U.num(S.ciezarWlasny.dodatek) / 100), 2)} kN/m</td><td></td></tr>`);
+  if (R.sec) { const on = S.ciezarWlasny.auto !== false; rows.push(`<tr class="${on ? '' : 'ldoff'}" title="${on ? 'Odznacz, aby pominąć ciężar własny w obliczeniach' : 'Ciężar własny pominięty – zaznacz, aby uwzględnić'}"><td><input type="checkbox" class="ldon" data-ldon="sw" ${on ? 'checked' : ''}> <b>G₀</b></td><td>ciężar własny belki</td><td>stałe</td><td class="n">${fmt(R.sec.gk * (1 + U.num(S.ciezarWlasny.dodatek) / 100), 2)} kN/m</td><td></td></tr>`); }
   S.obciazenia.forEach((o, i) => {
     const comp = (o.sklad || []).map(k => k.typ === 'q' ? `${fmt(U.num(k.q0), 2)}${k.q1 !== '' && k.q1 !== undefined && U.num(k.q1) !== U.num(k.q0) ? '…' + fmt(U.num(k.q1), 2) : ''} kN/m` : k.typ === 'P' ? `${fmt(U.num(k.P), 1)} kN @ ${fmt(U.num(k.x), 2)} m` : `${fmt(U.num(k.M), 1)} kNm`).join('; ');
     const psi = BS.S.RODZAJE[o.rodzaj].stale || o.rodzaj === 'A' ? '' : 'ψ ' + BS.K.psi(o).map(v => fmt(v, 1)).join('/');
@@ -6964,6 +6981,7 @@ document.addEventListener('click', async e => {
   const t = e.target.closest && e.target.closest('[data-btab]'); if (t) { switchBeam(+t.dataset.btab); return; }
   if (e.target.closest && e.target.closest('[data-badd]')) addBeam();
 });
+document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('#inputs [data-act]'); if (b) { e.preventDefault(); doAct(b.dataset.act); } });
 document.addEventListener('click', e => { const a = e.target.closest && e.target.closest('[data-cjs], [data-cjt]'); if (!a || !a.closest('#inputs')) return; if (a.dataset.cjs !== undefined) A.jointDesigner({ sup: +a.dataset.cjs }); else A.jointDesigner({ styk: +a.dataset.cjt }); });
 document.addEventListener('dblclick', e => { const t = e.target.closest && e.target.closest('[data-btab]'); if (!t) return; const f = $('#projName'); if (f) { f.focus(); f.select(); } });
 let asT = null;
@@ -7106,7 +7124,7 @@ A.checksHTML = checksHTML;
 function bindNref(root) { $$('[data-nref]', root).forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); const c = (R().checks || []).find(q => q.id === b.dataset.nref); if (c) A.explainPopup(c); })); }
 A.bindNref = bindNref;
 // pole liczbowe okna (z listą ▾ wartości typowych): k – ścieżka w stanie
-const fNum = (k, l, u, list, o) => { o = o || {}; const v = getP(S(), k); return `<div class="row"><label>${sym(l)}</label><div class="combo"><input data-k="${k}" value="${esc(showNum(v))}" data-min="${o.min !== undefined ? o.min : ''}" data-max="${o.max !== undefined ? o.max : ''}" data-opt="${o.opt ? 1 : ''}" data-re="${o.re ? 1 : ''}" ${o.ph ? `placeholder="${esc(o.ph)}"` : ''} autocomplete="off" spellcheck="false"><button tabindex="-1" type="button" data-list="${esc(JSON.stringify(list || []))}" aria-label="lista">▾</button></div><span class="unit">${u || ''}</span></div>`; };
+const fNum = (k, l, u, list, o) => { o = o || {}; const v = getP(S(), k); return `<div class="row"><label>${sym(l)}</label><div class="combo"><input data-k="${k}" value="${esc(showNum(v))}" data-min="${o.min !== undefined ? o.min : ''}" data-max="${o.max !== undefined ? o.max : ''}" data-opt="${o.opt ? 1 : ''}" data-re="${o.re ? 1 : ''}" ${o.maxMsg ? `data-maxmsg="${esc(o.maxMsg)}"` : ''} ${o.ph ? `placeholder="${esc(o.ph)}"` : ''} autocomplete="off" spellcheck="false"><button tabindex="-1" type="button" data-list="${esc(JSON.stringify(list || []))}" aria-label="lista">▾</button></div><span class="unit">${u || ''}</span></div>`; };
 const fSel = (k, l, opts, o) => { o = o || {}; const v = getP(S(), k); return `<div class="row ${o.wide ? 'wide' : ''}"><label>${sym(l)}</label><select data-k="${k}" data-num="${o.num ? 1 : ''}" data-re="${o.re === false ? '' : 1}">${opts.map(([a, b]) => `<option value="${esc(a)}" ${String(a) === String(v) ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select>${o.wide ? '' : '<span></span>'}</div>`; };
 const fChk = (k, l, o) => `<label class="chk"><input type="checkbox" data-k="${k}" data-re="${(o || {}).re === false ? '' : 1}" ${getP(S(), k) ? 'checked' : ''}><span>${sym(l)}</span></label>`;
 A.fNum = fNum; A.fSel = fSel; A.fChk = fChk;
@@ -7530,9 +7548,39 @@ const checksOf = (c) => {
 };
 const stOf = (u) => (u === null || u === undefined ? 'info' : !isFinite(u) || u > 1 + 1e-9 ? 'fail' : 'ok');
 
+/* ---------------------------------------------------------- wymiary blach wynikają z rozmieszczenia śrub (otwory zawsze w obrysie blachy) */
+const roRow = (l, id, v, f2) => `<div class="row" title="Wymiar wynika z rozmieszczenia śrub: ${esc(f2.replace(/^= /, ''))}"><label>${sym(l)}</label><div class="roval" id="${id}"><b>${fmt(v, 0)}</b> mm</div><span class="unit" style="font-size:10.5px;white-space:nowrap">auto</span></div>`;
+function syncLayout(c) {
+  const w = c.w, sec = R().sec, u = U.num;
+  if (c.kind === 'sup' && ['blacha_czolowa', 'blacha_zebrowa', 'katowniki'].includes(w.typ)) {
+    const nr = Math.max(1, Math.round(u(w.nr, u(w.n, 2)))); w.nr = nr; if (w.typ === 'blacha_zebrowa') w.n = nr;
+    w.hp = w.typ === 'blacha_czolowa' && w.pelna ? sec.h : 2 * u(w.e1) + (nr - 1) * u(w.p1);
+    if (w.typ === 'blacha_czolowa') w.bp = u(w.p3) + 2 * u(w.e2);
+  } else if (c.kind === 'styk' && w.typ === 'nakladkowy') {
+    const nw = Math.max(1, Math.round(u(w.nw, 3))); w.nw = nw; w.hpw = 2 * u(w.e1w) + (nw - 1) * u(w.p1w);
+  }
+}
+function limits(c) {
+  const w = c.w, sec = R().sec, u = U.num, B = M.SRUBY[w.d] || M.SRUBY.M16, d0 = B.d0, r = sec.r || 0, tw = sec.tw || 0;
+  const H = c.kind === 'sup' && w.typ === 'blacha_czolowa' && w.pelna ? sec.h : W.webClear(sec, w);
+  const nr = Math.max(1, Math.round(u(w.nr, 2))), e1 = u(w.e1), p1 = u(w.p1);
+  const L = {
+    nr: w.typ === 'blacha_czolowa' && w.pelna ? Math.floor((H - e1 - 1.2 * d0) / Math.max(1, p1)) + 1 : Math.floor((H - 2 * e1) / Math.max(1, p1)) + 1,
+    e1: w.typ === 'blacha_czolowa' && w.pelna ? H - (nr - 1) * p1 - 1.2 * d0 : (H - (nr - 1) * p1) / 2,
+    p1: nr > 1 ? (w.typ === 'blacha_czolowa' && w.pelna ? (H - e1 - 1.2 * d0) / (nr - 1) : (H - 2 * e1) / (nr - 1)) : 1e6,
+    p3Min: Math.ceil(tw + 2 * u(w.a) * Math.SQRT2 + d0)
+  };
+  if (c.kind === 'styk') {
+    const tf = Math.min(sec.tg || 10, sec.td || 10), Hw = sec.h - 2 * (tf + r) - 10, nw = Math.max(1, Math.round(u(w.nw, 3))), e1w = u(w.e1w), p1w = u(w.p1w);
+    L.nw = Math.floor((Hw - 2 * e1w) / Math.max(1, p1w)) + 1; L.e1w = (Hw - (nw - 1) * p1w) / 2; L.p1w = nw > 1 ? (Hw - 2 * e1w) / (nw - 1) : 1e6;
+    L.gfMin = Math.ceil(tw + 2 * r + d0); L.gfMax = Math.floor(Math.min(u(w.bfo, sec.bg), Math.min(sec.bg || 999, sec.bd || 999)) - 2.4 * d0);
+  }
+  Object.keys(L).forEach(k => { L[k] = Math.floor(L[k] * 10) / 10; });
+  return L;
+}
 /* ---------------------------------------------------------- formularz */
 function formHTML(c) {
-  const b = c.base, w = c.w, sec = R().sec, t = w.typ, fN = A.fNum, fS = A.fSel, fC = A.fChk;
+  const b = c.base, w = c.w, sec = R().sec, t = w.typ, fN = A.fNum, fS = A.fSel, fC = A.fChk, lim = limits(c);
   const sub = (k, l) => `<div class="lsub" data-js="${k}">${l}</div>`;
   let h = '';
   if (c.kind === 'styk') {
@@ -7552,27 +7600,27 @@ function formHTML(c) {
   // element podpierający
   if (c.kind === 'sup') h += sub('sup', 'Element podpierający') + fS(b + '.sup', 'Rodzaj', Object.keys(W.PODPORA).map(k => [k, W.PODPORA[k]]), { wide: true }) + fN(b + '.tsup', 'Grubość ścianki t', 'mm', [6, 8, 10, 12, 15, 20, 25], { min: 3 }) + fS(b + '.supGat', 'Gatunek stali', GAT());
   // elementy łączące
-  if (t === 'blacha_czolowa') h += sub('plate', 'Blacha czołowa') + fC(b + '.pelna', 'Blacha pełnej wysokości (spawana także do pasów)', { re: true }) + fN(b + '.hp', 'Wysokość h_{p}', 'mm', [120, 150, 180, 200, 230, 260, 300, 350, 400], { min: 50 }) + fN(b + '.bp', 'Szerokość b_{p}', 'mm', [100, 120, 140, 150, 160, 180, 200], { min: 50 }) + fN(b + '.tp', 'Grubość t_{p}', 'mm', [8, 10, 12, 15, 20], { min: 4 }) + fS(b + '.gatP', 'Gatunek blachy', GAT());
-  if (t === 'blacha_zebrowa') h += sub('plate', 'Blacha żebrowa') + fN(b + '.hp', 'Wysokość h_{p}', 'mm', [120, 150, 180, 200, 230, 260, 300, 350], { min: 50 }) + fN(b + '.tp', 'Grubość t_{p}', 'mm', [8, 10, 12, 15], { min: 4 }) + fN(b + '.z', 'Lico podpory – 1. kolumna śrub z', 'mm', [50, 55, 60, 70, 80, 100], { min: 20 }) + fN(b + '.e2b', 'Koniec belki – 1. kolumna e_{2,b}', 'mm', [35, 40, 45, 50, 60], { min: 10 }) + fS(b + '.gatP', 'Gatunek blachy', GAT());
+  if (t === 'blacha_czolowa') h += sub('plate', 'Blacha czołowa') + fC(b + '.pelna', 'Blacha pełnej wysokości (spawana także do pasów)', { re: true }) + roRow('Wysokość h_{p}', 'jdHp', U.num(w.hp), w.pelna ? '= h belki' : '= 2e₁ + (n_r − 1)p₁') + roRow('Szerokość b_{p}', 'jdBp', U.num(w.bp), '= p₃ + 2e₂') + fN(b + '.tp', 'Grubość t_{p}', 'mm', [8, 10, 12, 15, 20], { min: 4 }) + fS(b + '.gatP', 'Gatunek blachy', GAT());
+  if (t === 'blacha_zebrowa') h += sub('plate', 'Blacha żebrowa') + roRow('Wysokość h_{p}', 'jdHp', U.num(w.hp), '= 2e₁ + (n_r − 1)p₁') + roRow('Długość blachy', 'jdLp', U.num(w.z) + (U.num(w.nc, 1) - 1) * U.num(w.p2) + U.num(w.e2), '= z + (n_c − 1)p₂ + e₂') + fN(b + '.tp', 'Grubość t_{p}', 'mm', [8, 10, 12, 15], { min: 4 }) + fN(b + '.z', 'Lico podpory – 1. kolumna śrub z', 'mm', [50, 55, 60, 70, 80, 100], { min: 20 }) + fN(b + '.e2b', 'Koniec belki – 1. kolumna e_{2,b}', 'mm', [35, 40, 45, 50, 60], { min: 10 }) + fS(b + '.gatP', 'Gatunek blachy', GAT());
   if (t === 'katowniki') {
     const ser = w.Lser === 'LN' ? 'LN' : 'L';
-    h += sub('angle', 'Kątowniki (2 szt.)') + fS(b + '.Lser', 'Seria', [['L', 'równoramienne L'], ['LN', 'nierównoramienne L']], { re: true }) + fS(b + '.L', 'Kątownik', P.lista(ser).map(n => [n, 'L ' + String(n).replace(/x/g, '×')])) + (ser === 'LN' ? fC(b + '.dlugiNaPodp', 'Dłuższe ramię na podporze') : '') + fN(b + '.hp', 'Długość kątowników h_{p}', 'mm', [120, 150, 180, 200, 230, 260, 300], { min: 50 }) + fN(b + '.gb', 'Rozstaw g_{b} (ramię na belce)', 'mm', [35, 40, 45, 50, 55, 60], { min: 15 }) + fN(b + '.gs', 'Rozstaw g_{s} (ramię na podporze)', 'mm', [35, 40, 45, 50, 55, 60], { min: 15 }) + fN(b + '.gap', 'Szczelina belka–podpora c', 'mm', [5, 10, 15, 20], { min: 0 }) + fS(b + '.gatP', 'Gatunek kątowników', GAT());
+    h += sub('angle', 'Kątowniki (2 szt.)') + fS(b + '.Lser', 'Seria', [['L', 'równoramienne L'], ['LN', 'nierównoramienne L']], { re: true }) + fS(b + '.L', 'Kątownik', P.lista(ser).map(n => [n, 'L ' + String(n).replace(/x/g, '×')])) + (ser === 'LN' ? fC(b + '.dlugiNaPodp', 'Dłuższe ramię na podporze') : '') + roRow('Długość kątowników h_{p}', 'jdHp', U.num(w.hp), '= 2e₁ + (n_r − 1)p₁') + fN(b + '.gb', 'Rozstaw g_{b} (ramię na belce)', 'mm', [35, 40, 45, 50, 55, 60], { min: 15 }) + fN(b + '.gs', 'Rozstaw g_{s} (ramię na podporze)', 'mm', [35, 40, 45, 50, 55, 60], { min: 15 }) + fN(b + '.gap', 'Szczelina belka–podpora c', 'mm', [5, 10, 15, 20], { min: 0 }) + fS(b + '.gatP', 'Gatunek kątowników', GAT());
   }
   if (t === 'spawane') h += sub('weld', 'Spoiny') + fS(b + '.spoiny', 'Rodzaj spoin', [['srodnik', 'pachwinowe – tylko środnik (przegub)'], ['obwodowe', 'pachwinowe obwodowe (środnik + pasy)'], ['czolowa', 'czołowa z pełnym przetopem']], { wide: true, re: true }) + (w.spoiny !== 'czolowa' ? fN(b + '.aw', 'Spoiny środnika a_{w}', 'mm', [3, 4, 5, 6, 7, 8, 10], { min: 3 }) + (w.spoiny === 'obwodowe' ? fN(b + '.af', 'Spoiny pasów a_{f}', 'mm', [4, 5, 6, 8, 10, 12], { min: 3 }) : '') : '');
   if (c.kind === 'styk' && w.typ === 'nakladkowy') {
-    h += sub('fcov', 'Nakładki pasów') + fN(b + '.tfo', 'Zewnętrzna – grubość t_{fo}', 'mm', [8, 10, 12, 15, 20, 25], { min: 4 }) + fN(b + '.bfo', 'Zewnętrzna – szerokość b_{fo}', 'mm', [100, 120, 150, 180, 200, 250, 300], { min: 50 }) + fN(b + '.tfi', 'Wewnętrzne – grubość t_{fi} (0 – brak)', 'mm', [0, 8, 10, 12, 15], { min: 0, re: true }) + fN(b + '.bfi', 'Wewnętrzne – szerokość b_{fi}', 'mm', [40, 50, 60, 70, 80, 100], { min: 20 }) + fN(b + '.nf', 'Rzędy śrub n_{f} (na stronę styku)', 'szt.', [2, 3, 4, 5, 6], { min: 1 }) + fN(b + '.gf', 'Rozstaw poprzeczny g_{f}', 'mm', [70, 80, 90, 100, 110, 120, 140], { min: 20 }) + fN(b + '.p1f', 'Rozstaw podłużny p_{1}', 'mm', [55, 60, 70, 80, 90, 100], { min: 20 }) + fN(b + '.e1f', 'Koniec nakładki e_{1}', 'mm', [30, 35, 40, 45, 50], { min: 10 }) + fN(b + '.ef', 'Koniec belki – 1. rząd e_{f}', 'mm', [30, 35, 40, 45, 50], { min: 10 }) + fN(b + '.gap', 'Szczelina między belkami g', 'mm', [5, 10, 15, 20], { min: 0 });
-    h += sub('wcov', 'Nakładki środnika (2 szt.)') + fN(b + '.tpw', 'Grubość t_{p}', 'mm', [6, 8, 10, 12, 15], { min: 4 }) + fN(b + '.hpw', 'Wysokość h_{p}', 'mm', [120, 150, 200, 250, 300, 400, 500], { min: 50 }) + fN(b + '.nw', 'Rzędy śrub n_{w}', 'szt.', [2, 3, 4, 5, 6, 7, 8], { min: 1 }) + fN(b + '.ncw', 'Kolumny śrub (na stronę)', 'szt.', [1, 2, 3], { min: 1, max: 3 }) + fN(b + '.p1w', 'Rozstaw pionowy p_{1}', 'mm', [55, 60, 70, 80, 90, 100], { min: 20 }) + fN(b + '.p2w', 'Rozstaw poziomy p_{2}', 'mm', [55, 60, 70, 80], { min: 20 }) + fN(b + '.e1w', 'Krawędź pozioma e_{1}', 'mm', [30, 35, 40, 45, 50], { min: 10 }) + fN(b + '.ew', 'Koniec belki – 1. kolumna e_{w}', 'mm', [30, 35, 40, 45, 50], { min: 10 }) + fN(b + '.e2w', 'Koniec nakładki e_{2}', 'mm', [30, 35, 40, 45, 50], { min: 10 }) + fS(b + '.gatP', 'Gatunek nakładek', [['', 'jak belka']].concat(GAT()));
+    h += sub('fcov', 'Nakładki pasów') + fN(b + '.tfo', 'Zewnętrzna – grubość t_{fo}', 'mm', [8, 10, 12, 15, 20, 25], { min: 4 }) + fN(b + '.bfo', 'Zewnętrzna – szerokość b_{fo}', 'mm', [100, 120, 150, 180, 200, 250, 300], { min: 50 }) + fN(b + '.tfi', 'Wewnętrzne – grubość t_{fi} (0 – brak)', 'mm', [0, 8, 10, 12, 15], { min: 0, re: true }) + fN(b + '.bfi', 'Wewnętrzne – szerokość b_{fi}', 'mm', [40, 50, 60, 70, 80, 100], { min: 20 }) + fN(b + '.nf', 'Rzędy śrub n_{f} (na stronę styku)', 'szt.', [2, 3, 4, 5, 6], { min: 1 }) + fN(b + '.gf', 'Rozstaw poprzeczny g_{f}', 'mm', [70, 80, 90, 100, 110, 120, 140], { min: lim.gfMin, max: lim.gfMax, maxMsg: 'Otwory nie zmieszczą się w pasie / nakładce – g_f ≤ {max} mm' }) + fN(b + '.p1f', 'Rozstaw podłużny p_{1}', 'mm', [55, 60, 70, 80, 90, 100], { min: 20 }) + fN(b + '.e1f', 'Koniec nakładki e_{1}', 'mm', [30, 35, 40, 45, 50], { min: 10 }) + fN(b + '.ef', 'Koniec belki – 1. rząd e_{f}', 'mm', [30, 35, 40, 45, 50], { min: 10 }) + fN(b + '.gap', 'Szczelina między belkami g', 'mm', [5, 10, 15, 20], { min: 0 });
+    h += sub('wcov', 'Nakładki środnika (2 szt.)') + fN(b + '.tpw', 'Grubość t_{p}', 'mm', [6, 8, 10, 12, 15], { min: 4 }) + roRow('Wysokość h_{p}', 'jdHp', U.num(w.hpw), '= 2e₁ + (n_w − 1)p₁') + fN(b + '.nw', 'Rzędy śrub n_{w}', 'szt.', [2, 3, 4, 5, 6, 7, 8], { min: 1, max: lim.nw, re: true, maxMsg: 'Otwory nie zmieszczą się w środniku belki (wysokość w świetle) – najwięcej {max} rzędów' }) + fN(b + '.ncw', 'Kolumny śrub (na stronę)', 'szt.', [1, 2, 3], { min: 1, max: 3 }) + fN(b + '.p1w', 'Rozstaw pionowy p_{1}', 'mm', [55, 60, 70, 80, 90, 100], { min: 20, max: lim.p1w, re: true, maxMsg: 'Otwory nie zmieszczą się w środniku belki (wysokość w świetle) – p₁ ≤ {max} mm' }) + fN(b + '.p2w', 'Rozstaw poziomy p_{2}', 'mm', [55, 60, 70, 80], { min: 20 }) + fN(b + '.e1w', 'Krawędź pozioma e_{1}', 'mm', [30, 35, 40, 45, 50], { min: 10, max: lim.e1w, re: true, maxMsg: 'Otwory nie zmieszczą się w środniku belki (wysokość w świetle) – e₁ ≤ {max} mm' }) + fN(b + '.ew', 'Koniec belki – 1. kolumna e_{w}', 'mm', [30, 35, 40, 45, 50], { min: 10 }) + fN(b + '.e2w', 'Koniec nakładki e_{2}', 'mm', [30, 35, 40, 45, 50], { min: 10 }) + fS(b + '.gatP', 'Gatunek nakładek', [['', 'jak belka']].concat(GAT()));
   }
   // śruby
   if (t !== 'spawane' && !(c.kind === 'styk' && w.typ === 'spawany')) {
     h += sub('bolts', 'Śruby') + fS(b + '.d', 'Średnica', BOLTS()) + fS(b + '.kl', 'Klasa', BKL(), { re: true }) + fS(b + '.otw', 'Otwory', [['normalne', 'normalne (d₀ = d + 1…3)'], ['powiekszone', 'powiększone']], { wide: true }) + fC(b + '.gwint', 'Gwint w płaszczyźnie ścinania');
     if (w.kl === '8.8' || w.kl === '10.9') { h += fC(b + '.sprezane', 'Śruby sprężane (PN-EN 14399, kontrolowane dokręcenie)', { re: true }); if (w.sprezane) h += fS(b + '.kat', 'Kategoria połączenia', [['A', 'A – docisk (sprężanie montażowe)'], ['B', 'B – cierne w SGU'], ['C', 'C – cierne w SGN']], { wide: true }) + fS(b + '.pow', 'Klasa powierzchni ciernej', Object.keys(W.MU).map(k => [k, W.MU_N[k]]), { wide: true }); }
     if (c.kind === 'sup') {
-      h += sub('layout', 'Rozmieszczenie śrub') + fN(b + '.nr', 'Liczba rzędów n_{r}', 'szt.', [1, 2, 3, 4, 5, 6, 7, 8], { min: 1, max: 12 });
-      if (t === 'blacha_zebrowa') h += fN(b + '.nc', 'Liczba kolumn', 'szt.', [1, 2], { min: 1, max: 2, re: true }) + (U.num(w.nc, 1) > 1 ? fN(b + '.p2', 'Rozstaw kolumn p_{2}', 'mm', [50, 55, 60, 70, 80], { min: 20 }) : '');
-      h += fN(b + '.e1', 'Krawędź pionowa e_{1}', 'mm', [30, 35, 40, 45, 50, 60], { min: 10 }) + fN(b + '.p1', 'Rozstaw pionowy p_{1}', 'mm', [55, 60, 65, 70, 75, 80, 90, 100], { min: 20 });
-      if (t === 'blacha_czolowa') h += fN(b + '.p3', 'Rozstaw poprzeczny p_{3} (gauge)', 'mm', [70, 80, 90, 100, 110, 120, 140], { min: 30 }) + fN(b + '.e2', 'Krawędź boczna e_{2}', 'mm', [25, 30, 35, 40, 45, 50], { min: 10 });
-      if (t === 'blacha_zebrowa') h += fN(b + '.e2', 'Krawędź pozioma blachy e_{2}', 'mm', [35, 40, 45, 50, 60], { min: 10 });
+      h += sub('layout', 'Rozmieszczenie śrub') + fN(b + '.nr', 'Liczba rzędów n_{r}', 'szt.', [1, 2, 3, 4, 5, 6, 7, 8].filter(v => v <= lim.nr), { min: 1, max: lim.nr, re: true, maxMsg: 'Otwory nie zmieszczą się w środniku belki (wysokość w świetle) – najwięcej {max} rzędów' }) + (lim.nr < 1 ? '<p class="hint" style="color:var(--fail)">Rozmieszczenie nie mieści się w środniku – zmniejsz e₁ lub p₁.</p>' : '');
+      if (t === 'blacha_zebrowa') h += fN(b + '.nc', 'Liczba kolumn', 'szt.', [1, 2], { min: 1, max: 2, re: true }) + (U.num(w.nc, 1) > 1 ? fN(b + '.p2', 'Rozstaw kolumn p_{2}', 'mm', [50, 55, 60, 70, 80], { min: 20, re: true }) : '');
+      h += fN(b + '.e1', 'Krawędź pionowa e_{1}', 'mm', [30, 35, 40, 45, 50, 60], { min: 10, max: lim.e1, re: true, maxMsg: 'Otwory nie zmieszczą się w środniku belki (wysokość w świetle) – e₁ ≤ {max} mm' }) + fN(b + '.p1', 'Rozstaw pionowy p_{1}', 'mm', [55, 60, 65, 70, 75, 80, 90, 100], { min: 20, max: lim.p1, re: true, maxMsg: 'Otwory nie zmieszczą się w środniku belki (wysokość w świetle) – p₁ ≤ {max} mm' });
+      if (t === 'blacha_czolowa') h += fN(b + '.p3', 'Rozstaw poprzeczny p_{3} (gauge)', 'mm', [70, 80, 90, 100, 110, 120, 140], { min: lim.p3Min, re: true }) + fN(b + '.e2', 'Krawędź boczna e_{2}', 'mm', [25, 30, 35, 40, 45, 50], { min: 10, re: true });
+      if (t === 'blacha_zebrowa') h += fN(b + '.e2', 'Krawędź pozioma blachy e_{2}', 'mm', [35, 40, 45, 50, 60], { min: 10, re: true });
     }
   }
   if (t === 'blacha_czolowa' || t === 'blacha_zebrowa') h += sub('weld', 'Spoiny blachy') + fN(b + '.a', 'Grubość spoin pachwinowych a (dwustronne)', 'mm', [3, 4, 5, 6, 7, 8, 10], { min: 3 });
@@ -7636,6 +7684,9 @@ A.jointDesigner = function (sel) {
   const m = $('#modal');
   const live = () => {
     const c = ctxCur(); if (!c || !$('.dlg.jdes', m)) return;
+    syncLayout(c);
+    const setRo = (id, v) => { const e = $('#' + id, m); if (e) e.querySelector('b').textContent = fmt(v, 0); };
+    setRo('jdHp', U.num(c.kind === 'styk' ? c.w.hpw : c.w.hp)); setRo('jdBp', U.num(c.w.bp)); setRo('jdLp', U.num(c.w.z) + (U.num(c.w.nc, 1) - 1) * U.num(c.w.p2) + U.num(c.w.e2));
     const vw = $('#jdV', m), wv = Math.max(360, Math.min(640, (vw ? vw.clientWidth : 560) - 12));
     $('#jdTabs', m).innerHTML = tabsHTML(c); bindTabs();
     $('#jdF', m).innerHTML = forcesHTML(c);
@@ -7659,13 +7710,14 @@ A.jointDesigner = function (sel) {
   };
   const draw = () => {
     const c = ctxCur(); if (!c) { A.setPopRedraw(null); Q.closeModal(); return; }
+    syncLayout(c);
     const keep = $('#jdForm', m) ? $('#jdForm', m).scrollTop : 0;
     m.innerHTML = `<div class="dlg jdes" role="document"><div class="jhead"><h3 style="margin:0">Projektowanie połączeń</h3><span class="hint" style="margin:0">PN-EN 1993-1-8 · ${esc(c.title)}</span><span class="sp"></span><button class="btn sm pri" id="jdAuto" type="button" title="Najtańszy wariant tego rodzaju połączenia spełniający wszystkie warunki (wytężenie ≤ η z paska doboru)">⚙ Dobierz ten węzeł</button>${c.kind === 'sup' ? '<button class="btn sm" id="jdCopy" type="button" title="Skopiuj połączenie na pozostałe podpory belki">Kopiuj na inne podpory</button>' : '<button class="btn sm dng" id="jdDel" type="button">Usuń styk</button>'}<button class="btn sm" id="jdRep" type="button">Tok obliczeń…</button><button class="btn sm" id="nClose" type="button">Zamknij</button></div>
       <div class="beamtabs jtabs" id="jdTabs"></div>
       <div class="jbody"><div class="jcol fields" id="jdForm">${formHTML(c)}</div><div class="jcol"><div id="jdS"></div><div class="jviews" id="jdV"></div><p class="hint">Kliknij element rysunku (blachę, śruby, spoinę, podporę, podcięcie) – przejście do jego parametrów. Kolor śrub wg wytężenia (czerwony – przekroczenie); najedź na śrubę – siły.</p></div><div class="jcol" id="jdC"></div></div></div>`;
     m.style.display = 'flex';
     $('#jdForm', m).scrollTop = keep;
-    A.bindFields($('#jdForm', m), (re) => { if (re) { A.recalcNow(); draw(); } });
+    A.bindFields($('#jdForm', m), (re) => { const c2 = ctxCur(); if (c2) syncLayout(c2); if (re) { A.recalcNow(); draw(); } });
     $$('[data-jt]', m).forEach(b => b.addEventListener('click', () => {
       const t = b.dataset.jt, st = S();
       if (c.kind === 'styk') { st.styki[cur.styk].typ = t; }
@@ -7962,23 +8014,21 @@ V.sum = function (el) {
   if (msgs.length) h += `<div class="msgs">${msgs.join('')}</div>`;
   const nF = c.filter(x => x.status === 'fail');
   if (nF.length) h += `<div class="failnav">Niespełnione warunki: ${c.map((x, i) => x.status === 'fail' ? `<button class="goto" data-goto2="${i}" type="button">${esc(x.n)}</button>` : '').join('')}</div>`;
-  const ticks = st.meta.ticks || {}, nT = c.filter(x => ticks[x.id]).length;
-  h += `<div class="tickbar"><span id="tickCnt">Odhaczono: <b>${nT}</b> z ${c.length}</span><button class="btn sm" id="tickOk" type="button">Odhacz spełnione</button><button class="btn sm" id="tickClr" type="button">Wyczyść znaczniki</button><span class="hint">Kliknij numer punktu normy – objaśnienie; kliknij warunek – jak obliczono; „pokaż →” – miejsce, którego dotyczy.</span></div>`;
-  h += `<div class="tscroll"><table class="ctab"><thead><tr><th class="tk" title="Sprawdzone – w raporcie">✓</th><th>Sprawdzenie</th><th>Punkt normy</th><th style="text-align:right">Warunek</th><th>Wykorzystanie</th><th>Status</th><th class="nt">Uwagi</th></tr></thead><tbody>`;
+  // znaczniki „spełniony” ustawiane automatycznie na podstawie bieżących wyników (każde przeliczenie odświeża zakładkę)
+  const isOk = (x) => x.info || x.status === 'ok', nOk = c.filter(isOk).length, nW = c.filter(x => !x.info && x.status === 'warn').length, nFl = c.filter(x => !x.info && x.status === 'fail').length;
+  h += `<div class="tickbar"><span id="tickCnt">Spełnione: <b>${nOk}</b> z ${c.length}${nW ? ` · z uwagami: <b>${nW}</b>` : ''}${nFl ? ` · <span style="color:var(--fail)">niespełnione: <b>${nFl}</b></span>` : ''}</span><span class="hint">Znaczniki ✓ ustawiane automatycznie i aktualizowane przy każdej zmianie danych. Kliknij numer punktu normy – objaśnienie; kliknij warunek – jak obliczono; „pokaż →” – miejsce, którego dotyczy.</span></div>`;
+  h += `<div class="tscroll"><table class="ctab"><thead><tr><th class="tk" title="Warunek spełniony (automatycznie)">✓</th><th>Sprawdzenie</th><th>Punkt normy</th><th style="text-align:right">Warunek</th><th>Wykorzystanie</th><th>Status</th><th class="nt">Uwagi</th></tr></thead><tbody>`;
   let grp = '';
   c.forEach((x, i) => {
     if (x.grp !== grp) { grp = x.grp; h += `<tr class="g"><td colspan="7">${esc(grp)}</td></tr>`; }
-    const on = !!ticks[x.id], stc = x.info ? 'info' : x.status;
-    h += `<tr class="${on ? 'done' : ''}" data-ci="${i}"><td class="tk"><input type="checkbox" data-tick="${i}" ${on ? 'checked' : ''} aria-label="sprawdzone"></td><td>${esc(x.n)}${x.combo ? `<br><small class="hint" style="margin:0">${esc(x.combo).slice(0, 110)}</small>` : ''}</td><td class="ref"><button class="nref" data-ref="${i}" type="button" title="Objaśnienie punktu normy">${esc(x.ref || '—')}</button></td><td class="val">${A.ckCond(x)}</td><td class="bar" style="white-space:nowrap">${A.utilBar(x)}</td><td class="stc"><span class="st ${stc}">${A.STL[stc]}</span><button class="goto" data-goto="${i}" type="button" title="Przejdź do miejsca, którego dotyczy warunek">pokaż →</button></td><td class="nt">${x.note ? exDetails(esc(x.note)) : ''}</td></tr>`;
+    const on = isOk(x), stc = x.info ? 'info' : x.status;
+    h += `<tr class="${on ? 'done' : ''}" data-ci="${i}"><td class="tk"><input type="checkbox" data-tick="${i}" ${on ? 'checked' : ''} ${stc === 'warn' ? 'data-ind="1"' : ''} tabindex="-1" aria-readonly="true" aria-label="${on ? 'spełniony' : stc === 'warn' ? 'spełniony z uwagą' : 'niespełniony'}" title="${on ? 'Warunek spełniony' : stc === 'warn' ? 'Spełniony z uwagą (zalecenie)' : 'Warunek NIE spełniony'} – znacznik automatyczny"></td><td>${esc(x.n)}${x.combo ? `<br><small class="hint" style="margin:0">${esc(x.combo).slice(0, 110)}</small>` : ''}</td><td class="ref"><button class="nref" data-ref="${i}" type="button" title="Objaśnienie punktu normy">${esc(x.ref || '—')}</button></td><td class="val">${A.ckCond(x)}</td><td class="bar" style="white-space:nowrap">${A.utilBar(x)}</td><td class="stc"><span class="st ${stc}">${A.STL[stc]}</span><button class="goto" data-goto="${i}" type="button" title="Przejdź do miejsca, którego dotyczy warunek">pokaż →</button></td><td class="nt">${x.note ? exDetails(esc(x.note)) : ''}</td></tr>`;
   });
   h += '</tbody></table></div>';
   el.innerHTML = h;
   bindHead(el);
-  const upd = () => { const n = c.filter(x => (S().meta.ticks || {})[x.id]).length; $('#tickCnt', el).innerHTML = `Odhaczono: <b>${n}</b> z ${c.length}`; };
-  const setTick = (x, v) => { const m = S().meta; m.ticks = m.ticks || {}; if (v) m.ticks[x.id] = true; else delete m.ticks[x.id]; };
-  $$('[data-tick]', el).forEach(cb => cb.addEventListener('change', () => { setTick(c[+cb.dataset.tick], cb.checked); cb.closest('tr').classList.toggle('done', cb.checked); upd(); A.markDirty(); A.invalidate('report'); }));
-  $('#tickOk', el).onclick = () => { c.forEach(x => { if (x.status === 'ok' || x.info) setTick(x, true); }); A.markDirty(); A.invalidate('report'); V.sum(el); };
-  $('#tickClr', el).onclick = () => { S().meta.ticks = {}; A.markDirty(); A.invalidate('report'); V.sum(el); };
+  $$('[data-ind]', el).forEach(cb => { cb.indeterminate = true; });
+  $$('[data-tick]', el).forEach(cb => cb.addEventListener('click', ev => ev.preventDefault()));
   $$('[data-ref]', el).forEach(b => b.addEventListener('click', () => A.normPopup(c[+b.dataset.ref])));
   $$('tr[data-ci] td.val, tr[data-ci] td.bar', el).forEach(td => { td.classList.add('xclick'); td.title = 'Kliknij – jak obliczono (wzór, podstawienie, punkt normy)'; td.addEventListener('click', () => A.explainPopup(c[+td.closest('tr').dataset.ci])); });
   $$('[data-goto], [data-goto2]', el).forEach(b => b.addEventListener('click', () => A.gotoCheck(c[+(b.dataset.goto || b.dataset.goto2)])));

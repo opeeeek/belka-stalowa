@@ -48,8 +48,8 @@ D.scheme = function (S, R, o) {
   const legend = o.legend || [], out = o.out || {};
   // pasma obciążeń
   const bands = [], pts = [];
-  const sw = (S.ciezarWlasny || {}).auto !== false && R.sec;
-  if (sw) bands.push({ li: 'sw', col: KC.sw, x0: 0, x1: L, q0: R.sec.gk * (1 + U.num(S.ciezarWlasny.dodatek) / 100), q1: null, lab: `G₀ ciężar własny: q = ${fmt(R.sec.gk * (1 + U.num(S.ciezarWlasny.dodatek) / 100), 2)} kN/m`, off: false, inStage: true });
+  const swOn = (S.ciezarWlasny || {}).auto !== false;
+  if (R.sec) bands.push({ li: 'sw', col: KC.sw, x0: 0, x1: L, q0: R.sec.gk * (1 + U.num(S.ciezarWlasny.dodatek) / 100), q1: null, lab: `G₀ ciężar własny: q = ${fmt(R.sec.gk * (1 + U.num(S.ciezarWlasny.dodatek) / 100), 2)} kN/m${swOn ? '' : ' (pominięty)'}`, off: !swOn, inStage: true });
   (S.obciazenia || []).forEach((c, li) => {
     const st = RODZ()[c.rodzaj] || {}, et = U.clamp(Math.round(U.num(c.etap, md.nE - 1)), 0, md.nE - 1);
     const inStage = st.stale ? et <= s : et === s;

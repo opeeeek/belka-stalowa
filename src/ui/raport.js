@@ -236,9 +236,7 @@ RP.build = function (S, R, opt) {
   h += line(`<b>Razem stal ${f(to.total, 1)} kg</b>${Object.keys(to.bolts).length ? `; śruby: ${Object.keys(to.bolts).map(k => `${to.bolts[k]} × ${esc(k)}`).join(', ')}` : ''}${to.weld ? `; spoiny pachwinowe ok. ${f(to.weld / 1000, 2)} m` : ''}`);
   // ---------------------------------------------------------- zestawienie sprawdzeń
   h += H2('Zestawienie sprawdzeń');
-  const ticks = S.meta.ticks || {}, anyT = R.checks.some(c => ticks[c.id]);
-  const list = anyT ? R.checks.filter(c => ticks[c.id]) : R.checks;
-  if (!anyT) h += '<p class="note">Wszystkie sprawdzenia (w zakładce Podsumowanie można odhaczyć sprawdzenia przedstawiane w raporcie).</p>';
+  const list = R.checks;
   let grp = '';
   list.forEach(c => {
     if (c.grp !== grp) { grp = c.grp; h += `<h3>${esc(grp)}</h3>`; }

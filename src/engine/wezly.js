@@ -143,6 +143,12 @@ function beamWeb(o, ctx, B, V, lay) {
     o.add('Belka', 'Środnik – ścinanie przekroju netto w linii śrub', 'PN-EN 1993-1-1 6.2.6; 1-8 3.10', V, Math.max(0, Av - nr * B.d0 * tw) * mat.fu / (s3 * g2), 'F', `A_v,net = A_v − n_r·d₀·t_w = ${f(Av, 0)} − ${nr}·${B.d0}·${f(tw)} mm²`);
   }
 }
+/* ---------------------------------------------------------- wysokość środnika w świetle (między zaokrągleniami lub do podcięć) */
+function webClear(sec, w) {
+  const r = sec.r || 0, dnt = U.num(w && w.dnt), dnb = U.num(w && w.dnb);
+  return sec.h - (dnt > 0 ? dnt : (sec.tg || 0) + r) - (dnb > 0 ? dnb : (sec.td || 0) + r);
+}
+W.webClear = webClear;
 // element podpierający
 function support(o, ctx, w, B, V, n, hp, extra) {
   const { ndp } = ctx, g2 = ndp.gM2, g0 = ndp.gM0, t = U.num(w.tsup, 0);
@@ -170,7 +176,7 @@ W.endPlate = function (ctx, w, F) {
   const { sec, mat, ndp } = ctx, g0 = ndp.gM0, g1 = ndp.gM1, g2 = ndp.gM2;
   const o = rec(); o.typ = 'blacha_czolowa';
   const B = W.bolt(w, ndp), nr = Math.max(1, Math.round(U.num(w.nr, 2))), n = 2 * nr;
-  const hp = U.num(w.hp), bp = U.num(w.bp), tp = U.num(w.tp), e1 = U.num(w.e1), p1 = U.num(w.p1), e2 = U.num(w.e2), p3 = U.num(w.p3), a = U.num(w.a);
+  const hp = U.num(w.hp), bp = U.num(w.bp), tp = U.num(w.tp), e1 = U.num(w.e1), p1 = U.num(w.p1), p3 = U.num(w.p3), a = U.num(w.a), e2 = bp > 0 ? (bp - p3) / 2 : U.num(w.e2), e1d = hp - e1 - (nr - 1) * p1;
   const pl = steel(w.gatP || mat.gatunek, tp, ndp), V = Math.abs(F.V), Nt = Math.max(0, U.num(F.Nt));
   o.B = B; o.pl = pl; o.n = n;
   // współrzędne śrub: x – od osi środnika, z – od górnej krawędzi blachy w dół
@@ -218,14 +224,15 @@ W.endPlate = function (ctx, w, F) {
   }
   // --- konstrukcja i ciągliwość
   spacing(o, 'blacha czołowa', B, tp, { e1, e2, p1: nr > 1 ? p1 : undefined, p2: p3, exp: w.exp });
+  o.dmin('blacha czołowa', 'otwory w obrysie blachy: e₁,dół = h_p − e₁ − (n_r − 1)·p₁ ≥ 1,2·d₀', e1d, 1.2 * B.d0);
+  o.dmin('blacha czołowa', 'otwór poza spoiną środnika: (p₃ − t_w)/2 − a√2 ≥ d₀/2', (p3 - sec.tw) / 2 - a * Math.SQRT2, B.d0 / 2);
   const tpMax = (pl.fy <= 275 ? 0.5 : 0.42) * B.dd * (B.cl === '10.9' ? 0.85 : 1);
   o.dmax('blacha czołowa', `t_p ≤ ${pl.fy <= 275 ? '0,5' : '0,42'}·d (zdolność do obrotu przegubu)`, tp, tpMax, 'zal');
   o.dmin('blacha czołowa', 'h_p ≥ 0,6·h_b (stężenie skrętne końca belki)', hp, 0.6 * sec.h, 'zal');
-  o.dmax('blacha czołowa', 'h_p ≤ h_w (blacha w obrysie środnika)', hp, w.pelna ? sec.h : sec.h - (sec.tg || 0) - (sec.td || 0) - 2 * (sec.r || 0), w.pelna ? 'max' : 'zal');
+  o.dmax('blacha czołowa', w.pelna ? 'h_p ≤ h (blacha w obrysie belki)' : 'h_p ≤ h − 2(t_f + r) (blacha w obrysie środnika)', hp, w.pelna ? sec.h : sec.h - (sec.tg || 0) - (sec.td || 0) - 2 * (sec.r || 0));
   o.dmin('blacha czołowa', 'odstęp śruby od spoiny (p₃ − t_w)/2 − a√2 ≥ 0,5·s (klucz)', (p3 - sec.tw) / 2 - a * Math.SQRT2, 0.5 * B.s, 'zal');
   o.dmax('blacha czołowa', 'b_p ≤ szerokość pasa belki + 10 mm', bp, Math.min(sec.bg || sec.b || 1e9, sec.bd || sec.b || 1e9) + 10, 'zal');
-  o.dmin('blacha czołowa', 'b_p ≥ p₃ + 2·e₂', bp + 1e-6, p3 + 2 * e2);
-  o.mass = 7.85e-6 * hp * bp * tp; o.nb = n; o.weldL = 2 * hp; o.geom = { hp, bp, tp, nr, e1, p1, e2, p3, a, pelna: !!w.pelna };
+  o.mass = 7.85e-6 * hp * bp * tp; o.nb = n; o.weldL = 2 * hp; o.geom = { hp, bp, tp, nr, e1, p1, e2, p3, a, e1d, pelna: !!w.pelna };
   return fin(o);
 };
 
@@ -318,6 +325,8 @@ W.finPlate = function (ctx, w, F) {
   }
   // --- konstrukcja
   spacing(o, 'blacha żebrowa', B, tp, { e1, e2, p1: nr > 1 ? p1 : undefined, p2: nc > 1 ? p2 : undefined, exp: w.exp });
+  o.dmin('blacha żebrowa', 'otwory w obrysie blachy: e₁,dół = h_p − e₁ − (n_r − 1)·p₁ ≥ 1,2·d₀', hp - e1 - (nr - 1) * p1, 1.2 * B.d0);
+  o.dmax('blacha żebrowa', 'h_p ≤ wysokość środnika w świetle (otwory w środniku belki)', hp, webClear(sec, w));
   spacing(o, 'środnik belki', B, sec.tw, { e2: e2b, p1: undefined });
   o.dmax('blacha żebrowa', 't_p ≤ 0,5·d (ciągliwość – SCI)', tp, 0.5 * B.dd, 'zal');
   o.dmin('blacha żebrowa', 'e₂ ≥ 2·d (ciągliwość – SCI)', e2, 2 * B.dd, 'zal');
@@ -382,12 +391,15 @@ W.cleats = function (ctx, w, F) {
   // --- konstrukcja
   spacing(o, 'kątowniki (ramię na belce)', B, ta, { e1, e2: eb, p1: nr > 1 ? p1 : undefined, exp: w.exp });
   spacing(o, 'kątowniki (ramię na podporze)', B, ta, { e1, e2: es, p1: nr > 1 ? p1 : undefined });
+  o.dmin('kątowniki', 'otwory w obrysie kątowników: e₁,dół = h_p − e₁ − (n_r − 1)·p₁ ≥ 1,2·d₀', hp - e1 - (nr - 1) * p1, 1.2 * B.d0);
+  o.dmin('kątowniki', 'otwór poza zaokrągleniem: g_b ≥ t_a + r + d₀/2', gb, ta + ra + B.d0 / 2);
+  o.dmin('kątowniki', 'otwór poza zaokrągleniem: g_s ≥ t_a + r + d₀/2', gs, ta + ra + B.d0 / 2);
   o.dmin('środnik belki', 'e₂,b = g_b − c ≥ 1,2·d₀', e2b, 1.2 * B.d0);
   o.dmin('kątowniki', 'g_b ≥ t_a + r + 0,5·s (dostęp klucza)', gb, ta + ra + 0.5 * B.s, 'zal');
   o.dmin('kątowniki', 'g_s ≥ t_a + r + 0,5·s (dostęp klucza)', gs, ta + ra + 0.5 * B.s, 'zal');
   o.dmax('kątowniki', 't_a ≤ 0,5·d (ciągliwość)', ta, 0.5 * B.dd, 'zal');
   o.dmin('kątowniki', 'h_p ≥ 0,6·h_b (stężenie skrętne)', hp, 0.6 * sec.h, 'zal');
-  o.dmax('kątowniki', 'h_p ≤ h − 2(t_f + r) (w obrysie środnika)', hp, sec.h - (sec.tg || 0) - (sec.td || 0) - 2 * (sec.r || 0), 'zal');
+  o.dmax('kątowniki', 'h_p ≤ wysokość środnika w świetle (otwory w środniku belki)', hp, webClear(sec, w));
   const mpm = (P.props({ typ: 'kat', seria: ser, nr: w.L }) || {}).masa || 0;
   o.mass = 2 * mpm * hp / 1000; o.nb = nr + ns; o.weldL = 0;
   o.geom = { hp, nr, e1, p1, gb, gs, gap, lb, ls, ta, ra, e2b, eb, es };
@@ -485,6 +497,9 @@ W.splice = function (ctx, s, F) {
   spacing(o, 'nakładki pasa', B, tfo, { e1: e1f, e2: e2o, p1: nf > 1 ? p1f : undefined, p2: gf, exp: s.exp });
   o.dmin('pas belki', 'e_f (koniec belki) ≥ 1,2·d₀', ef, 1.2 * B.d0); o.dmin('pas belki', 'e₂ ≥ 1,2·d₀', e2f, 1.2 * B.d0);
   if (tfi > 0) o.dmax('nakładki wewnętrzne', 'b_fi ≤ (b_f − t_w − 2r)/2', bfi, (bf - tw - 2 * r) / 2);
+  o.dmin('pas belki', 'otwór poza zaokrągleniem środnika: g_f/2 ≥ t_w/2 + r + d₀/2', gf / 2, tw / 2 + r + B.d0 / 2);
+  o.dmax('nakładki pasa', 'otwory w obrysie nakładki zewnętrznej: g_f ≤ b_fo − 2·1,2·d₀', gf, bfo - 2.4 * B.d0);
+  if (tfi > 0) { const yi0 = tw / 2 + r, yi1 = yi0 + bfi; o.dmin('nakładki wewnętrzne', 'otwór w obrysie nakładki: g_f/2 − (t_w/2 + r) ≥ 1,2·d₀', gf / 2 - yi0, 1.2 * B.d0); o.dmin('nakładki wewnętrzne', 'otwór w obrysie nakładki: (t_w/2 + r + b_fi) − g_f/2 ≥ 1,2·d₀', yi1 - gf / 2, 1.2 * B.d0); }
   // ---------------- środnik
   const pts = []; let id = 0;
   for (let i = 0; i < nw; i++) for (let j = 0; j < ncw; j++) pts.push({ id: ++id, x: gap / 2 + ew + j * p2w, z: e1w + i * p1w, r: i, c: j });
@@ -505,7 +520,7 @@ W.splice = function (ctx, s, F) {
   spacing(o, 'nakładki środnika', B, tpw, { e1: e1w, e2: e2w, p1: nw > 1 ? p1w : undefined, p2: ncw > 1 ? p2w : undefined, exp: s.exp });
   o.dmin('środnik belki', 'e_w (koniec belki) ≥ 1,2·d₀', ew, 1.2 * B.d0);
   o.dmax('nakładki środnika', 'h_p ≤ h − 2(t_f + r) − 10', hpw, h - 2 * (tf + r) - 10);
-  o.dmin('nakładki środnika', 'h_p = 2e₁ + (n_w − 1)p₁', hpw + 1e-6, 2 * e1w + (nw - 1) * p1w);
+  o.dmin('nakładki środnika', 'otwory w obrysie nakładki: h_p − e₁ − (n_w − 1)·p₁ ≥ 1,2·d₀', hpw - e1w - (nw - 1) * p1w, 1.2 * B.d0);
   const Lf = 2 * (e1f + (nf - 1) * p1f + ef) + gap, Lw2 = 2 * (ew + (ncw - 1) * p2w + e2w) + gap;
   o.mass = 7.85e-6 * (2 * (Ao + Ai) * Lf + 2 * hpw * tpw * Lw2); o.nb = 2 * (2 * nb + nw * ncw); o.weldL = 0;
   o.geom = { tfo, bfo, tfi, bfi, nf, gf, e1f, p1f, ef, gap, tpw, hpw, nw, ncw, p1w, p2w, e1w, ew, e2w, Lf, Lw: Lw2 };
@@ -599,8 +614,8 @@ W.autoSplice = function (ctx, s0, F, eta) {
 /* ---------------------------------------------------------- wartości domyślne */
 W.defaults = function (typ, sec) {
   const h = (sec && sec.h) || 300, hw = sec ? sec.h - (sec.tg || 0) - (sec.td || 0) - 2 * (sec.r || 0) : 250, tw = (sec && sec.tw) || 7;
-  const hp = Math.max(100, Math.min(hw - 10, Math.ceil(0.62 * h / 10) * 10));
-  const nr = Math.max(1, Math.min(8, Math.floor((hp - 80) / 70) + 1)), p1 = nr > 1 ? Math.floor((hp - 80) / (nr - 1) / 5) * 5 : 70;
+  let nr = Math.max(1, Math.min(8, Math.round((0.62 * h - 80) / 70) + 1)); while (nr > 1 && 80 + (nr - 1) * 70 > hw) nr--;
+  const p1 = 70, hp = 80 + (nr - 1) * p1;
   const com = { gatP: 'S235', d: 'M20', kl: '8.8', gwint: true, otw: 'normalne', sprezane: false, kat: 'A', pow: 'B', sup: 'pas_slupa', tsup: 12, supGat: 'S235', Nt: 0, dnt: 0, dnb: 0, ln: 0, e1b: 60 };
   if (typ === 'blacha_czolowa') return Object.assign(com, { d: 'M16', hp, bp: 150, tp: 10, nr, e1: 40, p1, e2: 30, p3: 90, a: 5, pelna: false });
   if (typ === 'blacha_zebrowa') return Object.assign(com, { hp, tp: 10, nr, n: nr, nc: 1, e1: 40, p1, e2: 50, p2: 60, z: 60, e2b: 50, a: 6 });

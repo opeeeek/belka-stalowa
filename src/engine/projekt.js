@@ -59,6 +59,7 @@ J.normalize = function (st) {
   while (o.podpory.length < nS) o.podpory.push({ typ: 'przegub', ltb: 'widelkowe', ss: 100, c: 0, wezel: { typ: 'brak' } });
   ['obciazenia', 'etapy', 'stezenia', 'podporyTymczasowe', 'styki'].forEach(k => { if (!Array.isArray(o[k])) o[k] = []; });
   if (!o.etapy.length) o.etapy = [{ id: 'E1', nazwa: 'Eksploatacja', typ: 'eksploatacja', opis: '' }];
+  if (/^c[234]$/.test(o.schemat)) o.schemat = 'ciagla';
   o.format = BS.FORMAT;
   return o;
 };
@@ -554,9 +555,7 @@ J.SCHEMATY = [
   { id: 'utwutw', n: 'Obustronnie utwierdzona', d: 'oba końce sztywne', przesla: 1, sup: ['utwierdzenie', 'utwierdzenie'] },
   { id: 'wspP', n: 'Jednoprzęsłowa ze wspornikiem', d: 'przęsło + wspornik prawy', przesla: 1, wspP: true, sup: ['przegub', 'przegub'] },
   { id: 'wsp2', n: 'Jednoprzęsłowa z dwoma wspornikami', d: 'wsporniki z obu stron przęsła', przesla: 1, wspL: true, wspP: true, sup: ['przegub', 'przegub'] },
-  { id: 'c2', n: 'Belka ciągła dwuprzęsłowa', d: 'np. płatew, podciąg na 3 podporach', przesla: 2, sup: ['przegub', 'przegub', 'przegub'] },
-  { id: 'c3', n: 'Belka ciągła trzyprzęsłowa', d: '4 podpory', przesla: 3, sup: ['przegub', 'przegub', 'przegub', 'przegub'] },
-  { id: 'c4', n: 'Belka ciągła czteroprzęsłowa', d: '5 podpór', przesla: 4, sup: ['przegub', 'przegub', 'przegub', 'przegub', 'przegub'] },
+  { id: 'ciagla', n: 'Belka ciągła', d: 'liczba przęseł – pole „Liczba przęseł” (np. płatew, podciąg)', przesla: 3, ciagla: true, sup: ['przegub', 'przegub', 'przegub', 'przegub'] },
   { id: 'montaz', n: 'Belka z podporą montażową', d: 'etap 1 – podpora tymczasowa w środku, etap 2 – po jej usunięciu', przesla: 1, sup: ['przegub', 'przegub'], tmp: true },
   { id: 'stropowa', n: 'Belka stropowa z etapem montażu', d: 'montaż bez stężenia pasa górnego, eksploatacja – pas górny stężony płytą', przesla: 1, sup: ['przegub', 'przegub'], stages: true }
 ];
@@ -564,12 +563,14 @@ J.applyScheme = function (st, id) {
   const sc = J.SCHEMATY.find(q => q.id === id); if (!sc) return st;
   const g = st.geom || (st.geom = {});
   const L0 = U.num((g.przesla || [])[0], 6) || 6;
-  g.przesla = Array.from({ length: sc.przesla }, (_, i) => U.num((g.przesla || [])[i], L0) || L0);
+  const nP = sc.ciagla ? Math.max(2, (g.przesla || []).length) : sc.przesla;
+  g.przesla = Array.from({ length: nP }, (_, i) => U.num((g.przesla || [])[i], L0) || L0);
   g.wspL = sc.wspL ? (U.num(g.wspL) || Math.max(1, Math.round(L0 / 4 * 2) / 2)) : 0;
   g.wspP = sc.wspP ? (U.num(g.wspP) || (sc.przesla ? Math.max(1, Math.round(L0 / 4 * 2) / 2) : L0 / 2)) : 0;
   if (!sc.przesla && sc.wspP) g.wspP = U.num(g.wspP) || 2;
   const old = st.podpory || [];
-  st.podpory = sc.sup.map((t, i) => Object.assign({ ss: 100, c: 0, wezel: { typ: 'brak' } }, old[i] || {}, { typ: t, ltb: t === 'utwierdzenie' ? 'pelne' : 'widelkowe' }));
+  const sup = sc.ciagla ? Array.from({ length: nP + 1 }, () => 'przegub') : sc.sup;
+  st.podpory = sup.map((t, i) => Object.assign({ ss: 100, c: 0, wezel: { typ: 'brak' } }, old[i] || {}, { typ: t, ltb: t === 'utwierdzenie' ? 'pelne' : 'widelkowe' }));
   st.schemat = id;
   if (sc.tmp) {
     if (!st.etapy || st.etapy.length < 2) st.etapy = [{ id: 'E1', nazwa: 'Montaż – na podporze tymczasowej', typ: 'montaz', opis: '' }, { id: 'E2', nazwa: 'Eksploatacja', typ: 'eksploatacja', opis: '' }];

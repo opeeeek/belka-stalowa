@@ -793,3 +793,7 @@ svg.elev .xend { cursor: ew-resize; } svg.elev .xend circle { stroke-width: 1.4;
 .xrep .ok { color: var(--ok); font-weight: 700; } .xrep .fail { color: var(--fail); font-weight: 700; } .xrep .warn { color: var(--warn); font-weight: 700; }
 .xrep .note { font-size: 11.5px; font-style: italic; color: var(--ink2); }
 .xrep .fig { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0; overflow-x: auto; }
+.jdes .roval { grid-column: span 1; font-size: 12.5px; color: var(--ink); padding: 4px 6px; background: var(--itembg); border: 1px dashed var(--line); border-radius: 5px; min-height: 28px; display: flex; align-items: center; gap: 6px; }
+.jdes .roval small { color: var(--ink3); }
+table.ctab td.tk input[disabled] { opacity: 1; }
+table.ctab td.tk input[data-tick] { accent-color: var(--ok); cursor: default; }

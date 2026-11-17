@@ -31,7 +31,6 @@ const serieOf = (t) => P.RODZAJE[t].serie.map(k => [k, P.SERIA_N[k] || k]);
 const GROUPS = [
   { id: 'geo', title: 'Schemat statyczny i geometria', items: [
     { k: 'schemat', t: 'sel', l: 'Schemat statyczny', o: () => J.SCHEMATY.map(q => [q.id, q.n]).concat([['wlasny', 'własny (zmieniony na schemacie)']]), wide: true, re: true },
-    { t: 'html', h: () => `<div class="row wide"><span></span><button class="btn sm" data-act="schemes" type="button">Schematy typowe…</button></div>` },
     { t: 'spans' },
     { k: 'geom.wspL', t: 'num', l: 'Wspornik lewy', u: 'm', list: [0, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3], min: 0, re: true },
     { k: 'geom.wspP', t: 'num', l: 'Wspornik prawy', u: 'm', list: [0, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3], min: 0, re: true },
@@ -168,11 +167,11 @@ function connSummaryHTML() {
   let h = '<table class="kv" style="width:100%">';
   R.md.sup.forEach((p, i) => { const rp = (R.podpory || []).find(q => q.id === p.id) || { checks: [] }; h += row(`Podpora ${p.id}`, J.jointTxt((S.podpory[i] || {}).wezel || {}, R.sec), rp.checks, `data-cjs="${i}"`); });
   (S.styki || []).forEach((st2, j) => { const cs = R.checks.filter(c => c.id.indexOf(`S${j + 1}-`) === 0); h += row(`Styk S${j + 1}`, `x = ${fmt(U.num(st2.x), 2)} m – ${(BS.W.STYKI[st2.typ] || '')}`, cs, `data-cjt="${j}"`); });
-  return h + `</table><div class="row wide"><span></span><span><button class="btn sm pri" data-act="jdes" type="button">Projektowanie połączeń…</button> <button class="btn sm" data-act="addsplice" type="button">+ styk montażowy</button></span></div>`;
+  return h + `</table><div class="row wide"><span></span><span><button class="btn sm pri" data-act="jdes" type="button">Projektowanie połączeń…</button></span></div>`;
 }
 function loadMiniHTML() {
   const n = S.obciazenia.length, on = S.obciazenia.filter(o => o.aktywne !== false).length;
-  return `<div class="row wide"><span class="hint" style="margin:0">Przypadków obciążeń: <b>${n}</b>${n !== on ? ` (uwzględnionych ${on})` : ''}</span><button class="btn sm" data-act="loads" type="button">Obciążenia…</button></div>`;
+  return `<div class="row wide"><span class="hint" style="margin:0">Przypadków obciążeń: <b>${n}</b>${n !== on ? ` (uwzględnionych ${on})` : ''}</span></div>`;
 }
 function fatDetHTML() {
   const L = S.zmeczenie.detale || [];
@@ -257,7 +256,7 @@ function schemeOf() {
   if (n === 1 && wl && wp && allP) return 'wsp2';
   if (n === 1 && !wl && !wp && t[0] === 'utwierdzenie' && t[1] === 'przegub') return 'utwprz';
   if (n === 1 && !wl && !wp && t[0] === 'utwierdzenie' && t[1] === 'utwierdzenie') return 'utwutw';
-  if (n >= 2 && n <= 4 && !wl && !wp && allP) return 'c' + n;
+  if (n >= 2 && !wl && !wp && allP) return 'ciagla';
   return 'wlasny';
 }
 A.schemeOf = schemeOf;
@@ -274,7 +273,7 @@ function numInput(el, final) {
   const v = parseNum(raw);
   const bad = v === null || (min !== null && v < min) || (max !== null && v > max);
   el.classList.toggle('bad', bad);
-  if (bad) return;
+  if (bad) { if (final && v !== null) Q.toast(el.dataset.maxmsg && max !== null && v > max ? el.dataset.maxmsg.replace('{max}', showNum(max)) : `Dopuszczalny zakres: ${min !== null ? 'od ' + showNum(min) : ''}${max !== null ? ' do ' + showNum(max) : ''}`, 4500); return; }
   setP(S, el.dataset.k, v); onSet(el.dataset.k, v);
   if (final) el.value = showNum(v);
   changed(final && !!el.dataset.re);
@@ -460,7 +459,7 @@ function renderDataSide() {
     <div class="schsel">${sel.length ? `Zaznaczone: <b>${esc(sel.join(', '))}</b> · <button class="lnk" id="selClr" type="button">odznacz (Esc)</button>` : '<span class="mut">Lewy przycisk – zaznacz przęsło, prawy – menu (obciążenia, przekrój, stężenia, podpora…). Dwuklik na belce – węzeł w tym miejscu.</span>'}${stSw ? ` · ${stSw} <span class="mut">${esc(md.etapy[s].nazwa)}</span>` : ''}</div>
     <div class="schrow">${LEGW ? `<div class="ldleg" style="width:${LEGW}px">${legH}</div>` : ''}<div class="schemewrap"><div class="zoomtgt">${svg}${out.dgY ? `<div class="dgbar" style="top:${((out.dgY - 6) / out.H * 100).toFixed(2)}%">${dgSw}</div>` : ''}</div></div></div>${LEGW ? '' : `<div class="ldlegm">${legH}</div>`}${out.dgY ? '' : `<div style="text-align:center;margin:4px 0">${dgSw}</div>`}</div>`;
   h += `<div class="optchk">
-    <label class="chk sm"><input type="checkbox" data-ck="ciezarWlasny.auto" ${S.ciezarWlasny.auto !== false ? 'checked' : ''}><span>Uwzględnij ciężar własny belki (78,5 kN/m³)${S.ciezarWlasny.auto !== false ? ` + dodatek na połączenia <input class="txt sm" style="width:46px;height:22px" data-ckn="ciezarWlasny.dodatek" value="${esc(showNum(S.ciezarWlasny.dodatek))}"> %` : ''}</span></label>
+    <label class="chk sm"><input type="checkbox" data-ck="ciezarWlasny.auto" ${S.ciezarWlasny.auto !== false ? 'checked' : ''}><span>Uwzględnij ciężar własny belki (78,5 kN/m³) + dodatek na połączenia <input class="txt sm" style="width:46px;height:22px" data-ckn="ciezarWlasny.dodatek" value="${esc(showNum(S.ciezarWlasny.dodatek))}" ${S.ciezarWlasny.auto !== false ? '' : 'disabled'}> %</span></label>
     <label class="chk sm"><input type="checkbox" data-ck="stezenieCiagle.pasG" ${S.stezenieCiagle.pasG ? 'checked' : ''}><span>Pas górny stężony ciągle (płyta, blacha fałdowa)<small class="ophint">Zwichrzenie pasa górnego zablokowane od wskazanego etapu; przy momentach ujemnych ściskany pas dolny pozostaje niestężony.</small></span></label>
     <label class="chk sm"><input type="checkbox" data-ck="sgu.drgania" ${S.sgu.drgania !== false ? 'checked' : ''}><span>Sprawdzaj częstotliwość drgań własnych (f<sub>1</sub> ≥ f<sub>min</sub> = ${fmt(U.num(S.sgu.fmin, 3), 1)} Hz)</span></label>
     <div class="firerow"><label class="chk sm"><input type="checkbox" id="fireOn" ${S.pozar.aktywny ? 'checked' : ''}><span>Odporność ogniowa wg PN-EN 1993-1-2</span></label><select id="fireR" ${S.pozar.aktywny ? '' : 'disabled'}>${[15, 30, 45, 60, 90, 120, 180, 240].map(r => `<option value="${r}" ${U.num(S.pozar.R) === r ? 'selected' : ''}>R${r}</option>`).join('')}</select></div>${fireStatusHTML()}
@@ -494,7 +493,7 @@ function fireStatusHTML() {
 function loadSummaryHTML() {
   if (!R || !R.md) return '';
   const rows = [];
-  if (S.ciezarWlasny.auto !== false && R.sec) rows.push(`<tr><td><input type="checkbox" checked disabled class="ldon"> G₀</td><td>ciężar własny belki</td><td>stałe</td><td class="n">${fmt(R.sec.gk * (1 + U.num(S.ciezarWlasny.dodatek) / 100), 2)} kN/m</td><td></td></tr>`);
+  if (R.sec) { const on = S.ciezarWlasny.auto !== false; rows.push(`<tr class="${on ? '' : 'ldoff'}" title="${on ? 'Odznacz, aby pominąć ciężar własny w obliczeniach' : 'Ciężar własny pominięty – zaznacz, aby uwzględnić'}"><td><input type="checkbox" class="ldon" data-ldon="sw" ${on ? 'checked' : ''}> <b>G₀</b></td><td>ciężar własny belki</td><td>stałe</td><td class="n">${fmt(R.sec.gk * (1 + U.num(S.ciezarWlasny.dodatek) / 100), 2)} kN/m</td><td></td></tr>`); }
   S.obciazenia.forEach((o, i) => {
     const comp = (o.sklad || []).map(k => k.typ === 'q' ? `${fmt(U.num(k.q0), 2)}${k.q1 !== '' && k.q1 !== undefined && U.num(k.q1) !== U.num(k.q0) ? '…' + fmt(U.num(k.q1), 2) : ''} kN/m` : k.typ === 'P' ? `${fmt(U.num(k.P), 1)} kN @ ${fmt(U.num(k.x), 2)} m` : `${fmt(U.num(k.M), 1)} kNm`).join('; ');
     const psi = BS.S.RODZAJE[o.rodzaj].stale || o.rodzaj === 'A' ? '' : 'ψ ' + BS.K.psi(o).map(v => fmt(v, 1)).join('/');
@@ -640,6 +639,7 @@ document.addEventListener('click', async e => {
   const t = e.target.closest && e.target.closest('[data-btab]'); if (t) { switchBeam(+t.dataset.btab); return; }
   if (e.target.closest && e.target.closest('[data-badd]')) addBeam();
 });
+document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('#inputs [data-act]'); if (b) { e.preventDefault(); doAct(b.dataset.act); } });
 document.addEventListener('click', e => { const a = e.target.closest && e.target.closest('[data-cjs], [data-cjt]'); if (!a || !a.closest('#inputs')) return; if (a.dataset.cjs !== undefined) A.jointDesigner({ sup: +a.dataset.cjs }); else A.jointDesigner({ styk: +a.dataset.cjt }); });
 document.addEventListener('dblclick', e => { const t = e.target.closest && e.target.closest('[data-btab]'); if (!t) return; const f = $('#projName'); if (f) { f.focus(); f.select(); } });
 let asT = null;

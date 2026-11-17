@@ -257,23 +257,21 @@ V.sum = function (el) {
   if (msgs.length) h += `<div class="msgs">${msgs.join('')}</div>`;
   const nF = c.filter(x => x.status === 'fail');
   if (nF.length) h += `<div class="failnav">Niespełnione warunki: ${c.map((x, i) => x.status === 'fail' ? `<button class="goto" data-goto2="${i}" type="button">${esc(x.n)}</button>` : '').join('')}</div>`;
-  const ticks = st.meta.ticks || {}, nT = c.filter(x => ticks[x.id]).length;
-  h += `<div class="tickbar"><span id="tickCnt">Odhaczono: <b>${nT}</b> z ${c.length}</span><button class="btn sm" id="tickOk" type="button">Odhacz spełnione</button><button class="btn sm" id="tickClr" type="button">Wyczyść znaczniki</button><span class="hint">Kliknij numer punktu normy – objaśnienie; kliknij warunek – jak obliczono; „pokaż →” – miejsce, którego dotyczy.</span></div>`;
-  h += `<div class="tscroll"><table class="ctab"><thead><tr><th class="tk" title="Sprawdzone – w raporcie">✓</th><th>Sprawdzenie</th><th>Punkt normy</th><th style="text-align:right">Warunek</th><th>Wykorzystanie</th><th>Status</th><th class="nt">Uwagi</th></tr></thead><tbody>`;
+  // znaczniki „spełniony” ustawiane automatycznie na podstawie bieżących wyników (każde przeliczenie odświeża zakładkę)
+  const isOk = (x) => x.info || x.status === 'ok', nOk = c.filter(isOk).length, nW = c.filter(x => !x.info && x.status === 'warn').length, nFl = c.filter(x => !x.info && x.status === 'fail').length;
+  h += `<div class="tickbar"><span id="tickCnt">Spełnione: <b>${nOk}</b> z ${c.length}${nW ? ` · z uwagami: <b>${nW}</b>` : ''}${nFl ? ` · <span style="color:var(--fail)">niespełnione: <b>${nFl}</b></span>` : ''}</span><span class="hint">Znaczniki ✓ ustawiane automatycznie i aktualizowane przy każdej zmianie danych. Kliknij numer punktu normy – objaśnienie; kliknij warunek – jak obliczono; „pokaż →” – miejsce, którego dotyczy.</span></div>`;
+  h += `<div class="tscroll"><table class="ctab"><thead><tr><th class="tk" title="Warunek spełniony (automatycznie)">✓</th><th>Sprawdzenie</th><th>Punkt normy</th><th style="text-align:right">Warunek</th><th>Wykorzystanie</th><th>Status</th><th class="nt">Uwagi</th></tr></thead><tbody>`;
   let grp = '';
   c.forEach((x, i) => {
     if (x.grp !== grp) { grp = x.grp; h += `<tr class="g"><td colspan="7">${esc(grp)}</td></tr>`; }
-    const on = !!ticks[x.id], stc = x.info ? 'info' : x.status;
-    h += `<tr class="${on ? 'done' : ''}" data-ci="${i}"><td class="tk"><input type="checkbox" data-tick="${i}" ${on ? 'checked' : ''} aria-label="sprawdzone"></td><td>${esc(x.n)}${x.combo ? `<br><small class="hint" style="margin:0">${esc(x.combo).slice(0, 110)}</small>` : ''}</td><td class="ref"><button class="nref" data-ref="${i}" type="button" title="Objaśnienie punktu normy">${esc(x.ref || '—')}</button></td><td class="val">${A.ckCond(x)}</td><td class="bar" style="white-space:nowrap">${A.utilBar(x)}</td><td class="stc"><span class="st ${stc}">${A.STL[stc]}</span><button class="goto" data-goto="${i}" type="button" title="Przejdź do miejsca, którego dotyczy warunek">pokaż →</button></td><td class="nt">${x.note ? exDetails(esc(x.note)) : ''}</td></tr>`;
+    const on = isOk(x), stc = x.info ? 'info' : x.status;
+    h += `<tr class="${on ? 'done' : ''}" data-ci="${i}"><td class="tk"><input type="checkbox" data-tick="${i}" ${on ? 'checked' : ''} ${stc === 'warn' ? 'data-ind="1"' : ''} tabindex="-1" aria-readonly="true" aria-label="${on ? 'spełniony' : stc === 'warn' ? 'spełniony z uwagą' : 'niespełniony'}" title="${on ? 'Warunek spełniony' : stc === 'warn' ? 'Spełniony z uwagą (zalecenie)' : 'Warunek NIE spełniony'} – znacznik automatyczny"></td><td>${esc(x.n)}${x.combo ? `<br><small class="hint" style="margin:0">${esc(x.combo).slice(0, 110)}</small>` : ''}</td><td class="ref"><button class="nref" data-ref="${i}" type="button" title="Objaśnienie punktu normy">${esc(x.ref || '—')}</button></td><td class="val">${A.ckCond(x)}</td><td class="bar" style="white-space:nowrap">${A.utilBar(x)}</td><td class="stc"><span class="st ${stc}">${A.STL[stc]}</span><button class="goto" data-goto="${i}" type="button" title="Przejdź do miejsca, którego dotyczy warunek">pokaż →</button></td><td class="nt">${x.note ? exDetails(esc(x.note)) : ''}</td></tr>`;
   });
   h += '</tbody></table></div>';
   el.innerHTML = h;
   bindHead(el);
-  const upd = () => { const n = c.filter(x => (S().meta.ticks || {})[x.id]).length; $('#tickCnt', el).innerHTML = `Odhaczono: <b>${n}</b> z ${c.length}`; };
-  const setTick = (x, v) => { const m = S().meta; m.ticks = m.ticks || {}; if (v) m.ticks[x.id] = true; else delete m.ticks[x.id]; };
-  $$('[data-tick]', el).forEach(cb => cb.addEventListener('change', () => { setTick(c[+cb.dataset.tick], cb.checked); cb.closest('tr').classList.toggle('done', cb.checked); upd(); A.markDirty(); A.invalidate('report'); }));
-  $('#tickOk', el).onclick = () => { c.forEach(x => { if (x.status === 'ok' || x.info) setTick(x, true); }); A.markDirty(); A.invalidate('report'); V.sum(el); };
-  $('#tickClr', el).onclick = () => { S().meta.ticks = {}; A.markDirty(); A.invalidate('report'); V.sum(el); };
+  $$('[data-ind]', el).forEach(cb => { cb.indeterminate = true; });
+  $$('[data-tick]', el).forEach(cb => cb.addEventListener('click', ev => ev.preventDefault()));
   $$('[data-ref]', el).forEach(b => b.addEventListener('click', () => A.normPopup(c[+b.dataset.ref])));
   $$('tr[data-ci] td.val, tr[data-ci] td.bar', el).forEach(td => { td.classList.add('xclick'); td.title = 'Kliknij – jak obliczono (wzór, podstawienie, punkt normy)'; td.addEventListener('click', () => A.explainPopup(c[+td.closest('tr').dataset.ci])); });
   $$('[data-goto], [data-goto2]', el).forEach(b => b.addEventListener('click', () => A.gotoCheck(c[+(b.dataset.goto || b.dataset.goto2)])));
