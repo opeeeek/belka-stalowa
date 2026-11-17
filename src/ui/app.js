@@ -1,624 +1,721 @@
 /* =====================================================================
-   BelkaStal – interfejs: stan projektu, formularze, obliczenia, pliki.
-   Most do aplikacji okienkowej (WebView2) jak w BelkaŻB/SłupŻB:
-   window.hostRequest(JSON) → window.__hostReply(id, wynik).
+   BelkaStal – interfejs (układ i sposób pracy jak w BelkaŻB/SłupŻB):
+   chipy sprawdzeń, „Dobierz przekrój / połączenia / wszystko”, grupy
+   pól z listami wartości typowych, klikany schemat (lewy przycisk –
+   zaznaczanie przęseł, prawy – menu), legenda obciążeń z polami
+   wyboru, wykres pod schematem, wiele belek w projekcie, pliki.
    ===================================================================== */
 (function () {
 'use strict';
-const BS = window.BS, U = BS.U, J = BS.J, N = BS.N, P = BS.P, M = BS.M, D = BS.D;
+const BS = window.BS, U = BS.U, J = BS.J, N = BS.N, P = BS.P, M = BS.M, D = BS.D, Q = BS.Q;
+const { $, $$, esc, fmt, sym, getP, setP, parseNum, showNum, exDetails } = Q;
 const A = BS.A = {};
-const $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
-const esc = U.esc;
-let S = J.defaultState(), R = null, filePath = '', dirty = false, tab = 'data', vStage = null, openGrp = null;
-const rendered = {};
-A.get = () => ({ S, R });
+let S = J.defaultState(), R = null, filePath = '', dirty = false;
+let BEAMS = null, curB = 0;
+let vStage = null;                              // etap pokazywany na schemacie (null – końcowy)
+const selSpans = new Set();
+let diagMode = (() => { try { return localStorage.getItem('bs.diag') || 'M'; } catch (e) { return 'M'; } })();
+let showDims = (() => { try { return localStorage.getItem('bs.dims') !== '0'; } catch (e) { return true; } })();
+let rendered = {};
+A.S = () => S; A.R = () => R;
+A.stage = () => (vStage === null || !R || !R.md ? (R && R.md ? R.md.nE - 1 : 0) : Math.min(vStage, R.md.nE - 1));
+A.setStage = (i) => { vStage = i; rendered = {}; renderDataSide(); renderActive(); };
+A.selSpans = selSpans;
 
-/* ---------------------------------------------------------- ścieżki w stanie */
-function getP(path) { return path.split('.').reduce((o, k) => (o === undefined || o === null ? undefined : o[k]), S); }
-function setP(path, v) {
-  const ks = path.split('.'); let o = S;
-  for (let i = 0; i < ks.length - 1; i++) { if (o[ks[i]] === undefined || o[ks[i]] === null) o[ks[i]] = /^\d+$/.test(ks[i + 1]) ? [] : {}; o = o[ks[i]]; }
-  o[ks[ks.length - 1]] = v;
+/* ================================================================ DEFINICJE PÓL */
+const rng = (a, b, st) => { const r = []; for (let v = a; v <= b + 1e-9; v += st) r.push(+v.toFixed(3)); return r; };
+const ND = (k) => `normy.ndp1.${k}`;
+const stOpts = () => S.etapy.map((e, i) => [i, `${i + 1}. ${e.nazwa}`]);
+const KIND = () => (S.przekroj || {}).typ || 'walc';
+const serieOf = (t) => P.RODZAJE[t].serie.map(k => [k, P.SERIA_N[k] || k]);
+const GROUPS = [
+  { id: 'geo', title: 'Schemat statyczny i geometria', items: [
+    { k: 'schemat', t: 'sel', l: 'Schemat statyczny', o: () => J.SCHEMATY.map(q => [q.id, q.n]).concat([['wlasny', 'własny (zmieniony na schemacie)']]), wide: true, re: true },
+    { t: 'html', h: () => `<div class="row wide"><span></span><button class="btn sm" data-act="schemes" type="button">Schematy typowe…</button></div>` },
+    { t: 'spans' },
+    { k: 'geom.wspL', t: 'num', l: 'Wspornik lewy', u: 'm', list: [0, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3], min: 0, re: true },
+    { k: 'geom.wspP', t: 'num', l: 'Wspornik prawy', u: 'm', list: [0, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3], min: 0, re: true },
+    { k: 'analiza.ltRozstaw', t: 'num', l: 'Rozstaw stężeń bocznych l_{t}', u: 'm', list: ['', 1, 1.5, 2, 2.5, 3, 4, 5, 6], opt: true, ph: 'brak', min: 0.2 },
+    { k: 'analiza.ltWys', t: 'sel', l: 'Stężenia l_{t} na wysokości', o: [['pas_g', 'pasa górnego'], ['pas_d', 'pasa dolnego'], ['srodek', 'środka ścinania']], show: s => U.num(s.analiza.ltRozstaw) > 0 },
+    { k: 'stezenieCiagle.pasG', t: 'chk', l: 'Pas górny stężony ciągle (płyta, blacha fałdowa, płyty warstwowe)', re: true },
+    { k: 'stezenieCiagle.odEtapu', t: 'sel', l: 'Stężenie ciągłe od etapu', o: stOpts, num: true, show: s => s.stezenieCiagle.pasG && s.etapy.length > 1 },
+    { t: 'hint', ex: true, exT: 'Co to jest stężenie boczne?', h: () => 'Stężenie boczne – element, który w danym punkcie blokuje przemieszczenie boczne pasa (np. belka poprzeczna, płatew, stężenie montażowe). Stężenia pasa ściskanego najbardziej zwiększają moment krytyczny M<sub>cr</sub>. Stężenia dyskretne o dowolnym położeniu i typie (boczne / skrętne) – przycisk <b>Stężenia</b> nad schematem lub prawy przycisk na przęśle.' },
+    { t: 'hint', h: () => R && R.md ? `Długość belki ${fmt(R.md.L / 1000, 2)} m · podpory: ${R.md.sup.map(p => p.id).join(', ')}${R.md.tmp.length ? ` · podpory montażowe: ${R.md.tmp.map(t => t.id).join(', ')}` : ''} · stężeń: ${R.md.stez.length}` : '' }
+  ] },
+  { id: 'sec', title: 'Przekrój i materiał', items: [
+    { k: 'przekroj.typ', t: 'sel', l: 'Rodzaj przekroju', o: () => Object.keys(P.RODZAJE).map(k => [k, P.RODZAJE[k].n]), wide: true, re: true },
+    { k: 'przekroj.seria', t: 'sel', l: 'Seria', o: () => serieOf(KIND()), show: s => KIND() !== 'spaw', re: true },
+    { k: 'przekroj.nr', t: 'sel', l: 'Kształtownik', o: () => P.lista(S.przekroj.seria).map(n => [n, (KIND() === 'walc' || KIND() === 'ceow' ? S.przekroj.seria + ' ' : KIND() === 'kat' ? 'L ' : '') + String(n).replace(/x/g, '×')]), num: () => KIND() === 'walc' || KIND() === 'ceow', show: s => KIND() !== 'spaw' && s.przekroj.seria !== 'wlasna', re: true, badge: true },
+    { k: 'przekroj.wyk', t: 'sel', l: 'Wykonanie rury', o: [['gor', 'gorąco wykończona (PN-EN 10210)'], ['zimn', 'formowana na zimno (PN-EN 10219)']], wide: true, show: () => KIND() === 'rura' },
+    { k: 'przekroj.poz', t: 'sel', l: 'Ramię poziome kątownika', o: [['dol', 'u dołu (kształt L)'], ['gora', 'u góry (kształt Γ)']], show: () => KIND() === 'kat' },
+    { k: 'przekroj.h', t: 'num', l: 'Wysokość h', u: 'mm', list: () => KIND() === 'rura' ? [40, 50, 60, 80, 100, 120, 140, 150, 160, 180, 200, 250, 300, 350, 400] : [300, 400, 500, 600, 700, 800, 900, 1000, 1200, 1400, 1600, 1800, 2000], min: 20, show: s => KIND() === 'spaw' || (KIND() === 'rura' && s.przekroj.seria === 'wlasna'), re: true, badge: true },
+    { k: 'przekroj.b', t: 'num', l: 'Szerokość b', u: 'mm', list: [40, 50, 60, 80, 100, 120, 150, 200, 250, 300], min: 20, show: s => KIND() === 'rura' && s.przekroj.seria === 'wlasna', re: true },
+    { k: 'przekroj.t', t: 'num', l: 'Grubość ścianki t', u: 'mm', list: [3, 4, 5, 6, 6.3, 8, 10, 12.5, 16], min: 1.5, show: s => KIND() === 'rura' && s.przekroj.seria === 'wlasna', re: true },
+    { k: 'przekroj.bg', t: 'num', l: 'Pas górny – szerokość b_{g}', u: 'mm', list: rng(150, 600, 25), min: 30, show: () => KIND() === 'spaw', re: true },
+    { k: 'przekroj.tg', t: 'num', l: 'Pas górny – grubość t_{g}', u: 'mm', list: [8, 10, 12, 14, 15, 16, 18, 20, 22, 25, 28, 30, 35, 40, 50], min: 3, show: () => KIND() === 'spaw', re: true },
+    { k: 'przekroj.bd', t: 'num', l: 'Pas dolny – szerokość b_{d}', u: 'mm', list: rng(150, 600, 25), min: 30, show: () => KIND() === 'spaw', re: true },
+    { k: 'przekroj.td', t: 'num', l: 'Pas dolny – grubość t_{d}', u: 'mm', list: [8, 10, 12, 14, 15, 16, 18, 20, 22, 25, 28, 30, 35, 40, 50], min: 3, show: () => KIND() === 'spaw', re: true },
+    { k: 'przekroj.tw', t: 'num', l: 'Środnik – grubość t_{w}', u: 'mm', list: [5, 6, 8, 10, 12, 14, 16, 20], min: 3, show: () => KIND() === 'spaw', re: true },
+    { k: 'przekroj.aw', t: 'num', l: 'Spoina pas–środnik a', u: 'mm', list: [3, 4, 5, 6, 7, 8], min: 0, show: () => KIND() === 'spaw' },
+    { k: 'material.gatunek', t: 'sel', l: 'Gatunek stali', o: () => Object.keys(M.STAL).map(k => [k, `${k} (${M.STAL[k].norma})`]), wide: true, re: true },
+    { k: 'material.podgatunek', t: 'sel', l: 'Podgatunek (udarność)', o: () => (M.STAL[S.material.gatunek] || { pod: ['JR'] }).pod.map(k => [k, `${k} – 27 J w ${M.T27J[k]} °C`]), wide: true },
+    { t: 'hint', h: () => secHint() },
+    { t: 'html', h: () => `<div class="row wide"><span></span><span><button class="btn sm" data-act="secwin" type="button">Przekrój…</button> <button class="btn sm" data-act="sectab" type="button">Tablica kształtowników…</button></span></div>` }
+  ] },
+  { id: 'load', title: 'Obciążenia', items: [
+    { t: 'sub', l: 'Kombinacje i siły przekrojowe' },
+    { k: ND('komb'), t: 'sel', l: 'Kombinacja SGN (PN-EN 1990)', o: [['6.10ab', 'wzory 6.10a i 6.10b'], ['6.10', 'wzór 6.10']], wide: true, re: true },
+    { k: ND('gG_sup'), t: 'num', l: 'γ_{G,sup} (γ_{G,inf} = 1,0)', list: [1.0, 1.15, 1.35], min: 0 },
+    { k: ND('gQ'), t: 'num', l: 'γ_{Q}', list: [0, 1.0, 1.5], min: 0 },
+    { k: ND('xi'), t: 'num', l: 'ξ (redukcja obc. stałych w 6.10b)', list: [0.85, 0.9, 1.0], min: 0, show: s => s.normy.ndp1.komb !== '6.10' },
+    { k: ND('psiAcc'), t: 'sel', l: 'Wiodące zmienne w 6.11b (wyjątkowa, pożar)', o: [['psi1', 'ψ₁ – wartość częsta'], ['psi2', 'ψ₂ – wartość quasi-stała']], wide: true, show: s => s.pozar.aktywny || s.obciazenia.some(o => o.rodzaj === 'A') },
+    { t: 'hint', h: () => 'Obciążenia zadajesz na schemacie: przycisk <b>Obciążenia</b> nad schematem (całej belki albo zaznaczonych przęseł) lub prawy przycisk na przęśle. Kliknięcie pasma obciążenia – zmiana; pole wyboru przy paśmie – uwzględnij / pomiń w obliczeniach.' },
+    { t: 'html', h: () => loadMiniHTML() }
+  ] },
+  { id: 'stab', title: 'Stateczność', items: [
+    { k: ND('ltbMet'), t: 'sel', l: 'Metoda χ_{LT}', o: [['6.3.2.3', '6.3.2.3 – walcowane i spawane równoważne'], ['6.3.2.2', '6.3.2.2 – przypadek ogólny']], wide: true },
+    { k: ND('kcMet'), t: 'sel', l: 'Współczynnik k_{c}', o: [['tab66', 'tabl. 6.6 / 1/√C₁ (MES)'], ['1', 'k_c = 1 (f = 1, bezpiecznie)']], wide: true },
+    { k: 'analiza.muY', t: 'num', l: 'Wyboczenie w płaszczyźnie μ_{y}', list: [0.5, 0.7, 0.85, 1, 1.5, 2], min: 0.1 },
+    { k: 'analiza.muZ', t: 'num', l: 'Wyboczenie z płaszczyzny μ_{z}', list: [0.5, 0.7, 0.85, 1], min: 0.1 },
+    { k: 'analiza.zebraRozstaw', t: 'num', l: 'Rozstaw żeber środnika a', u: 'm', list: [0, 0.5, 1, 1.5, 2, 2.5, 3], min: 0, ph: '0 – brak' },
+    { k: 'analiza.slupekSztywny', t: 'chk', l: 'Sztywny słupek podporowy (wyboczenie środnika przy ścinaniu)' },
+    { t: 'hint', ex: true, exT: 'Jak liczony jest moment krytyczny M_cr?', h: () => 'M<sub>cr</sub> wyznacza metoda elementów skończonych (u, u′, φ, φ′) dla rzeczywistego rozkładu M<sub>y</sub> z każdej decydującej kombinacji i każdego etapu – z wysokością przyłożenia obciążeń (pas górny / środek ścinania / pas dolny), monosymetrią przekroju i wszystkimi stężeniami. Postać zwichrzenia – zakładka <b>Stateczność</b>.' }
+  ] },
+  { id: 'sls', title: 'SGU – parametry', items: [
+    { k: 'sgu.typ', t: 'sel', l: 'Rodzaj elementu', o: () => Object.keys(N.UGIECIA).map(k => [k, N.UGIECIA[k].nazwa]), wide: true, re: true },
+    { k: 'sgu.wmax', t: 'sel', l: 'Ugięcie graniczne w_{max}', o: [150, 200, 250, 300, 350, 400, 500].map(v => [v, 'L/' + v]), num: true },
+    { k: 'sgu.w3', t: 'sel', l: 'Ugięcie od zmiennych w_{3}', o: [200, 250, 300, 350, 400, 500, 600].map(v => [v, 'L/' + v]), num: true },
+    { k: 'sgu.podniesienie', t: 'sel', l: 'Podniesienie wykonawcze w_{c}', o: [['brak', 'brak'], ['auto', 'równe ugięciu od G'], ['wartosc', 'zadana strzałka']], wide: true, re: true },
+    { k: 'sgu.wc', t: 'num', l: 'Strzałka podniesienia w_{c}', u: 'mm', list: [5, 10, 15, 20, 25, 30, 40, 50], min: 0, show: s => s.sgu.podniesienie === 'wartosc' },
+    { k: 'sgu.fmin', t: 'num', l: 'Częstotliwość f_{min}', u: 'Hz', list: [3, 4, 5, 6, 8, 10], min: 0, show: s => s.sgu.drgania !== false },
+    { k: 'sgu.uLim', t: 'sel', l: 'Przemieszczenie poziome u', o: [100, 150, 200, 250, 300].map(v => [v, 'L/' + v]), num: true },
+    { t: 'hint', ex: true, exT: 'Kiedy L/200, L/250, L/350…?', h: () => 'Kryteria ugięć uzgadnia się z inwestorem (PN-EN 1990, A1.4.2) – wartości domyślne wg praktyki krajowej (por. ZK do PN-EN 1993-1-1): stropy L/250, stropy pod kruchymi ściankami i tynkami L/350, płatwie i rygle L/200, podciągi L/350. Dla wspornika L = 2·L<sub>w</sub>. Podniesienie wykonawcze odejmuje się od ugięcia całkowitego (w<sub>max</sub> = w<sub>tot</sub> − w<sub>c</sub>).' }
+  ] },
+  { id: 'fire', title: 'Pożar – PN-EN 1993-1-2', show: s => s.pozar.aktywny, items: [
+    { k: 'pozar.R', t: 'sel', l: 'Wymagana klasa odporności', o: [15, 30, 45, 60, 90, 120, 180, 240].map(v => [v, 'R' + v]), num: true },
+    { k: 'pozar.ekspozycja', t: 'sel', l: 'Nagrzewanie', o: [['3', 'z 3 stron (płyta na pasie górnym)'], ['4', 'z 4 stron']], wide: true },
+    { k: 'pozar.ochrona', t: 'sel', l: 'Zabezpieczenie ogniochronne', o: [['brak', 'brak'], ['plyty', 'okładzina płytowa (skrzynkowa)'], ['natrysk', 'natrysk / powłoka (konturowa)']], wide: true, re: true },
+    { k: 'pozar.dp', t: 'num', l: 'Grubość zabezpieczenia d_{p}', u: 'mm', list: [10, 12.5, 15, 20, 25, 30, 40, 50], min: 1, show: s => s.pozar.ochrona !== 'brak' },
+    { k: 'pozar.lp', t: 'num', l: 'Przewodność λ_{p}', u: 'W/mK', list: [0.08, 0.1, 0.12, 0.15, 0.2, 0.25], min: 0.01, show: s => s.pozar.ochrona !== 'brak' },
+    { k: 'pozar.cp', t: 'num', l: 'Ciepło właściwe c_{p}', u: 'J/kgK', list: [1000, 1100, 1200, 1500], min: 100, show: s => s.pozar.ochrona !== 'brak' },
+    { k: 'pozar.rp', t: 'num', l: 'Gęstość ρ_{p}', u: 'kg/m³', list: [150, 300, 500, 800, 900], min: 10, show: s => s.pozar.ochrona !== 'brak' },
+    { k: 'pozar.kappa1', t: 'num', l: 'κ_{1} (puste – automatycznie)', list: ['', 0.7, 0.85, 1.0], opt: true, ph: 'auto' }
+  ] },
+  { id: 'fat', title: 'Zmęczenie – PN-EN 1993-1-9', show: s => s.zmeczenie.aktywny, items: [
+    { t: 'html', h: () => `<div class="row wide"><label>Przypadki cykliczne</label><span>${S.obciazenia.filter(o => !BS.S.RODZAJE[o.rodzaj].stale).map(o => `<label class="chk sm"><input type="checkbox" data-fatc="${esc(o.id)}" ${(S.zmeczenie.przypadki || []).includes(o.id) ? 'checked' : ''}><span>${esc(o.id)}</span></label>`).join(' ') || '<span class="hint">brak obciążeń zmiennych</span>'}</span></div>` },
+    { k: 'zmeczenie.n', t: 'num', l: 'Liczba cykli n w okresie użytkowania', list: [1e5, 5e5, 1e6, 2e6, 5e6, 1e7], min: 1 },
+    { k: 'zmeczenie.phi', t: 'num', l: 'Współczynnik dynamiczny φ', list: [1.0, 1.1, 1.2, 1.3, 1.5], min: 1 },
+    { k: 'zmeczenie.zmiennyZnak', t: 'chk', l: 'Obciążenie zmienia znak (zakres ×2)' },
+    { k: 'zmeczenie.ocena', t: 'sel', l: 'Metoda oceny', o: [['tolerancja', 'tolerancji uszkodzeń'], ['bezpieczna', 'bezpiecznego okresu użytkowania']], wide: true },
+    { k: 'zmeczenie.skutki', t: 'sel', l: 'Skutki zniszczenia', o: [['male', 'małe'], ['duze', 'duże']] },
+    { t: 'html', h: () => fatDetHTML() },
+    { k: 'zmeczenie.dtc', t: 'num', l: 'Δτ_{c} środnika', u: 'MPa', list: [80, 100], min: 10 }
+  ] },
+  { id: 'brit', title: 'Dobór stali – kruche pękanie (PN-EN 1993-1-10)', closed: true, items: [
+    { k: 'kruche.Tmd', t: 'num', l: 'Temperatura minimalna T_{md}', u: '°C', list: [0, -10, -15, -20, -25, -30, -32, -34, -36, -38], max: 30 },
+    { k: 'kruche.dTr', t: 'num', l: 'ΔT_{r} (promieniowanie)', u: 'K', list: [0, -3, -5], },
+    { k: 'kruche.dTeps', t: 'num', l: 'ΔT_{ε̇} (prędkość odkształceń)', u: 'K', list: [0, -10, -20] },
+    { k: 'kruche.dTcf', t: 'num', l: 'ΔT_{εcf} (zgniot na zimno)', u: 'K', list: [0, -10, -20] },
+    { k: 'kruche.plyty', t: 'num', l: 'σ_{Ed}/f_{y}(t) dla blach połączeń', list: [0.25, 0.5, 0.75], min: 0.05, max: 1 },
+    { k: 'kruche.z.aktywny', t: 'chk', l: 'Wymagania w kierunku grubości (klasa Z)', re: true },
+    { k: 'kruche.z.a', t: 'num', l: 'Grubość spoiny a_{eff}', u: 'mm', list: [5, 7, 10, 15, 20, 30], show: s => s.kruche.z.aktywny },
+    { k: 'kruche.z.Zb', t: 'num', l: 'Z_{b} – kształt złącza (tabl. 3.2 b)', list: [-25, -10, -5, 0, 3, 5, 8], show: s => s.kruche.z.aktywny },
+    { k: 'kruche.z.s', t: 'num', l: 'Grubość blachy s', u: 'mm', list: [10, 20, 30, 40, 50, 60], show: s => s.kruche.z.aktywny },
+    { k: 'kruche.z.Zd', t: 'sel', l: 'Z_{d} – sztywność skurczu', o: [[0, '0 – małe'], [3, '3 – średnie'], [5, '5 – duże']], num: true, show: s => s.kruche.z.aktywny },
+    { k: 'kruche.z.Ze', t: 'sel', l: 'Z_{e} – podgrzewanie', o: [[0, '0 – bez podgrzewania'], [-8, '−8 – podgrzewanie ≥ 100 °C']], num: true, show: s => s.kruche.z.aktywny },
+    { t: 'hint', h: () => 'T<sub>md</sub> – temperatura minimalna powietrza (ZK do PN-EN 1991-1-5, mapa T<sub>min</sub>); dla wnętrz ogrzewanych można przyjąć wyższą. ΔT<sub>R</sub> – w grupie Współczynniki.' }
+  ] },
+  { id: 'exec', title: 'Wykonanie (PN-EN 1090-2)', closed: true, items: [
+    { k: 'wykonanie.CC', t: 'sel', l: 'Klasa konsekwencji', o: [['CC1', 'CC1'], ['CC2', 'CC2'], ['CC3', 'CC3']] },
+    { k: 'wykonanie.EXC', t: 'sel', l: 'Klasa wykonania', o: [['auto', 'automatycznie (PN-EN 1993-1-1, zał. C)'], ['EXC1', 'EXC1'], ['EXC2', 'EXC2'], ['EXC3', 'EXC3'], ['EXC4', 'EXC4']], wide: true, re: true },
+    { k: 'wykonanie.uzasadnienie', t: 'txt', l: 'Uzasadnienie', show: s => s.wykonanie.EXC !== 'auto' },
+    { k: 'wykonanie.korozja', t: 'sel', l: 'Korozyjność (PN-EN ISO 12944-2)', o: ['C1', 'C2', 'C3', 'C4', 'C5', 'CX'].map(k => [k, k]) },
+    { k: 'wykonanie.trwalosc', t: 'sel', l: 'Trwałość ochrony', o: [['L', 'L (≤ 7 lat)'], ['M', 'M (7–15 lat)'], ['H', 'H (15–25 lat)'], ['VH', 'VH (> 25 lat)']] },
+    { k: 'wykonanie.uwagi', t: 'txt', l: 'Uwagi wykonawcze' },
+    { t: 'hint', h: () => R && R.exc ? `Przyjęto <b>${R.exc.exc}</b>: ${esc(R.exc.why.join('; '))}.` : '' }
+  ] },
+  { id: 'coef', title: 'Współczynniki (Załącznik krajowy PL)', closed: true, items: [
+    { k: ND('gM0'), t: 'num', l: 'γ_{M0} – nośność przekroju', list: [1.0, 1.05, 1.1], min: 1 },
+    { k: ND('gM1'), t: 'num', l: 'γ_{M1} – stateczność elementu', list: [1.0, 1.05, 1.1], min: 1 },
+    { k: ND('gM2'), t: 'num', l: 'γ_{M2} – połączenia, przekrój netto', list: [1.25], min: 1 },
+    { k: ND('gMfi'), t: 'num', l: 'γ_{M,fi} – pożar', list: [1.0], min: 1 },
+    { k: ND('eta'), t: 'num', l: 'η – ścinanie (PN-EN 1993-1-5, 5.1)', list: [1.0, 1.2], min: 1 },
+    { k: ND('lamLT0'), t: 'num', l: 'λ_{LT,0} (6.3.2.3)', list: [0.2, 0.4], min: 0 },
+    { k: ND('betaLT'), t: 'num', l: 'β (6.3.2.3)', list: [0.75, 1.0], min: 0.1 },
+    { k: ND('KFI'), t: 'num', l: 'K_{FI} (PN-EN 1990, zał. B)', list: [0.9, 1.0, 1.1], min: 0.5 },
+    { k: ND('gG_sup_equ'), t: 'num', l: 'γ_{G,sup} (EQU)', list: [1.1], min: 0 },
+    { k: ND('gG_inf_equ'), t: 'num', l: 'γ_{G,inf} (EQU)', list: [0.9], min: 0 },
+    { k: ND('fySrc'), t: 'sel', l: 'Źródło f_{y}, f_{u}', o: [['tab31', 'PN-EN 1993-1-1, tabl. 3.1'], ['wyrob', 'norma wyrobu (EN 10025)']], wide: true },
+    { k: ND('dTR'), t: 'num', l: 'ΔT_{R} (PN-EN 1993-1-10)', u: 'K', list: [0, 5, 10] },
+    { k: ND('gc'), t: 'num', l: 'γ_{c} – beton (oparcia)', list: [1.4, 1.5], min: 1 },
+    { t: 'hint', h: () => 'Wartości z polskich załączników krajowych do PN-EN 1990 i PN-EN 1993 (1. generacja). Pełne zestawienie dokumentów, wydań, zmian i poprawek – w raporcie (Podstawa normowa).' }
+  ] }
+];
+A.GROUPS = GROUPS;
+
+function secHint() {
+  if (!R || !R.sec || !R.base) return '';
+  const s = R.sec, b = R.base;
+  return `${esc(s.nazwa)}: A = ${fmt(s.A / 100, 1)} cm², I<sub>y</sub> = ${fmt(s.Iy / 1e4, 0)} cm⁴, W<sub>pl,y</sub> = ${fmt(s.Wpl_y / 1e3, 1)} cm³, ${fmt(s.masa, 1)} kg/m · f<sub>y</sub> = ${R.mat.fy} MPa, f<sub>u</sub> = ${R.mat.fu} MPa · klasa przy zginaniu ${b.kPos.cls}${b.kNeg.cls !== b.kPos.cls ? '/' + b.kNeg.cls : ''} · M<sub>c,Rd</sub> = ${fmt(b.Mc_pos / 1e6, 1)} kNm, V<sub>Rd</sub> = ${fmt(b.Vpl / 1e3, 1)} kN`;
 }
-A.getP = getP; A.setP = setP;
-
-/* ---------------------------------------------------------- generatory pól */
-const val = (p) => { const v = getP(p); return v === undefined || v === null ? '' : v; };
-const numStr = (v) => (v === '' || v === undefined || v === null ? '' : (typeof v === 'number' ? String(+v.toPrecision(10)).replace('.', ',') : String(v)));
-const opt = (o, v) => o.map(([k, l]) => `<option value="${esc(k)}"${String(k) === String(v) ? ' selected' : ''}>${esc(l)}</option>`).join('');
-function fNum(lab, p, unit, o) { o = o || {}; return `<div class="row"><label>${lab}</label><input class="txt num" data-p="${p}" data-t="${o.empty ? 'numE' : 'num'}"${o.r ? ' data-r="1"' : ''} value="${esc(numStr(val(p)))}" inputmode="decimal"${o.ph ? ` placeholder="${esc(o.ph)}"` : ''}><span class="unit">${unit || ''}</span></div>`; }
-function fSel(lab, p, options, o) { o = o || {}; return `<div class="row${o.wide ? ' wide' : ''}"><label>${lab}</label><select data-p="${p}" data-t="${o.num ? 'num' : 'str'}"${o.r !== false ? ' data-r="1"' : ''}>${opt(options, val(p))}</select>${o.wide ? '' : `<span class="unit">${o.unit || ''}</span>`}</div>`; }
-function fChk(lab, p, o) { o = o || {}; return `<label class="chk"><input type="checkbox" data-p="${p}" data-t="bool"${o.r !== false ? ' data-r="1"' : ''}${getP(p) ? ' checked' : ''}> ${lab}</label>`; }
-function fTxt(lab, p, o) { o = o || {}; return `<div class="row wide"><label>${lab}</label>${o.area ? `<textarea class="txt" data-p="${p}" data-t="str" rows="3">${esc(val(p))}</textarea>` : `<input class="txt" data-p="${p}" data-t="str" value="${esc(val(p))}"${o.type ? ` type="${o.type}"` : ''}>`}</div>`; }
-const inl = (p, o) => { o = o || {}; return `<input class="txt${o.cls ? ' ' + o.cls : ''}" data-p="${p}" data-t="${o.t || 'num'}"${o.r ? ' data-r="1"' : ''} value="${esc(o.t === 'str' ? val(p) : numStr(val(p)))}"${o.ph ? ` placeholder="${esc(o.ph)}"` : ''} title="${esc(o.title || '')}">`; };
-const ins = (p, options, o) => { o = o || {}; return `<select data-p="${p}" data-t="${o.num ? 'num' : 'str'}"${o.r !== false ? ' data-r="1"' : ''} title="${esc(o.title || '')}">${opt(options, val(p))}</select>`; };
-const hint = (t) => `<p class="hint">${t}</p>`;
-const grp = (id, title, body, badge) => `<details class="grp" data-g="${id}"${isOpen(id) ? ' open' : ''}><summary>${title}${badge ? `<span class="badge">${badge}</span>` : ''}</summary><div class="fields">${body}</div></details>`;
-function isOpen(id) { if (!openGrp) { try { openGrp = new Set(JSON.parse(localStorage.getItem('belkastal-grp') || 'null') || ['norm', 'geom', 'sec', 'load', 'stage']); } catch (e) { openGrp = new Set(['norm', 'geom', 'sec', 'load', 'stage']); } } return openGrp.has(id); }
-
-/* ---------------------------------------------------------- opcje */
-const O = {
-  podpora: [['przegub', 'przegubowa'], ['utwierdzenie', 'utwierdzenie'], ['sprezyna', 'sprężysta (kz, kφ)'], ['podatne', 'przegub + sprężyna obrotowa']],
-  ltb: [['widelkowe', 'widełkowa (u = φ = 0)'], ['pelne', 'pełna (+ u′ = φ′ = 0)']],
-  rodzaj: Object.keys(BS.S.RODZAJE).map(k => [k, BS.S.RODZAJE[k].n]),
-  kat: Object.keys(N.PSI).filter(k => k.startsWith('Q-')).map(k => [k, N.PSI[k].n]),
-  uklad: [['staly', 'w całości'], ['szachownica', 'niekorzystnie w przęsłach']],
-  wys: [['pas_g', 'na pasie górnym'], ['srodek', 'w środku ścinania'], ['pas_d', 'na pasie dolnym']],
-  kier: [['z', 'pionowo (z)'], ['y', 'poziomo (y)']],
-  typS: [['q', 'rozłożone q'], ['P', 'skupione P'], ['M', 'moment M']],
-  etapTyp: [['montaz', 'montaż / sytuacja przejściowa'], ['eksploatacja', 'eksploatacja / trwała']],
-  stez: [['boczne', 'boczne (blokuje u na wysokości)'], ['skretne', 'skrętne (blokuje φ)'], ['pelne', 'boczne + skrętne']],
-  wezel: [['brak', 'brak / oparcie na stali'], ['oparcie', 'oparcie na płycie (beton/mur)'], ['blacha_czolowa', 'krótka blacha czołowa'], ['blacha_zebrowa', 'blacha żebrowa (nakładka)']],
-  sruby: Object.keys(M.SRUBY).map(k => [k, k]), klasy: Object.keys(M.SRUBY_KL).map(k => [k, k]),
-  beton: Object.keys(M.BETON).map(k => [k, k]),
-  ugi: Object.keys(N.UGIECIA).map(k => [k, N.UGIECIA[k].nazwa])
-};
-const stageOpts = () => S.etapy.map((e, i) => [i, `${i + 1}. ${e.nazwa}`]);
-
-/* ================================================================ DANE */
-function renderInputs() {
-  const H = [];
-  H.push(grpNorm(), grpGeom(), grpSec(), grpLoads(), grpStages(), grpSup(), grpSGU(), grpAnal(), grpFire(), grpFat(), grpBrittle(), grpExec(), grpMeta());
-  $('#inputs').innerHTML = H.join('');
-  renderSide();
+function loadMiniHTML() {
+  const n = S.obciazenia.length, on = S.obciazenia.filter(o => o.aktywne !== false).length;
+  return `<div class="row wide"><span class="hint" style="margin:0">Przypadków obciążeń: <b>${n}</b>${n !== on ? ` (uwzględnionych ${on})` : ''}</span><button class="btn sm" data-act="loads" type="button">Obciążenia…</button></div>`;
 }
-
-function grpNorm() {
-  const o = N.ocen(S);
-  const P0 = S.normy;
-  let b = '';
-  b += fSel('Kraj / załączniki krajowe', 'normy.kraj', Object.keys(N.KRAJE).map(k => [k, N.KRAJE[k]]), { wide: true });
-  b += fSel('Generacja Eurokodów', 'normy.generacja', [[1, '1. generacja (PN-EN 199x z ZK PL)'], [2, '2. generacja (EN 199x:2022+)']], { wide: true, num: true });
-  b += `<div class="normbox"><div><span class="g">Stosowana: ${o.genStosowana}. generacja</span> · dokumentów w zakresie projektu: ${o.dokumenty.length}${o.genZadana !== o.genStosowana ? ' · <b style="color:var(--warn)">zastosowano zastępczo 1. generację</b>' : ''}</div><div style="margin-top:4px">${esc(o.decyzja)}</div></div>`;
-  b += fTxt('Data weryfikacji zestawu', 'normy.dataWeryfikacji', { type: 'date' });
-  b += fTxt('Zweryfikował(a)', 'normy.zweryfikowal');
-  b += fTxt('Źródło weryfikacji', 'normy.zrodloWeryfikacji');
-  b += `<div class="bar" style="margin-top:8px"><button class="btn sm" data-act="normy">Dokumenty, zmiany, poprawki, ZK i NDP…</button></div>`;
-  const nv = o.dokumenty.filter(d => !d.zweryfikowano).length;
-  const badge = o.bledy.length ? `<span class="st fail">błędy: ${o.bledy.length}</span>` : (nv || !P0.dataWeryfikacji) ? '<span class="st warn">do weryfikacji</span>' : '<span class="st ok">zweryfikowany</span>';
-  return grp('norm', 'Profil normowy', b, badge);
+function fatDetHTML() {
+  const L = S.zmeczenie.detale || [];
+  return `<div class="lsub">Szczegóły konstrukcyjne (kategorie Δσ<sub>c</sub>)</div>` + L.map((d, i) => `<div class="lrow"><select data-fd="${i}" data-fk="k">${BS.X.DETALE.map(q => `<option value="${q.k}" ${q.k === d.k ? 'selected' : ''}>${esc(q.n)}</option>`).join('')}</select><select data-fd="${i}" data-fk="miejsce">${[['pas_d', 'pas dolny'], ['pas_g', 'pas górny'], ['spoina_d', 'styk pas d.–środnik'], ['spoina_g', 'styk pas g.–środnik']].map(([k, l]) => `<option value="${k}" ${k === d.miejsce ? 'selected' : ''}>${l}</option>`).join('')}</select>${d.k === 'user' ? `<input class="txt sm" data-fd="${i}" data-fk="dc" value="${esc(showNum(d.dc || 71))}" title="Δσc [MPa]">` : ''}<button class="del sm" data-fdel="${i}" title="Usuń">×</button></div>`).join('') + `<button class="addp" data-fadd="1" type="button">+ szczegół</button>`;
 }
-
-function grpGeom() {
-  let b = '<div class="lhead">Przęsła <button class="addb" data-act="addSpan">+ przęsło</button></div>';
-  S.geom.przesla.forEach((v, i) => { b += `<div class="lrow"><span class="lid">${i + 1}</span> L<sub>${i + 1}</sub> = ${inl('geom.przesla.' + i, { r: true })}<span class="u">m</span>${S.geom.przesla.length > 1 ? `<button class="del sm" data-act="delSpan" data-i="${i}" title="Usuń przęsło">×</button>` : ''}</div>`; });
-  b += fNum('Wspornik lewy', 'geom.wspL', 'm', { r: true }) + fNum('Wspornik prawy', 'geom.wspP', 'm', { r: true });
-  b += '<div class="sub">Podpory</div>';
-  b += '<table class="grid"><tr><th></th><th>Rodzaj</th><th>Zwichrzenie</th><th title="Długość sztywnego docisku ss">ss [mm]</th><th title="Odległość od końca docisku do końca belki (podpora skrajna)">c [mm]</th></tr>';
-  S.podpory.forEach((p, i) => {
-    b += `<tr><td><b>${'ABCDEFGHIJKLMNOP'[i]}</b></td><td>${ins(`podpory.${i}.typ`, O.podpora)}${['sprezyna', 'podatne'].includes(p.typ) ? `<div class="lrow">${p.typ === 'sprezyna' ? `kz ${inl(`podpory.${i}.kz`, { cls: 'sm' })}<span class="u">kN/mm</span>` : ''} kφ ${inl(`podpory.${i}.kfi`, { cls: 'sm' })}<span class="u">kNm/rad</span></div>` : ''}</td><td>${ins(`podpory.${i}.ltb`, O.ltb)}</td><td>${inl(`podpory.${i}.ss`, { cls: 'sm' })}</td><td>${inl(`podpory.${i}.c`, { cls: 'sm' })}</td></tr>`;
+function spansHTML() {
+  const n = S.geom.przesla.length;
+  let h = `<div class="row"><label>Liczba przęseł</label><select data-nspan="1">${[0, 1, 2, 3, 4, 5, 6, 7, 8].map(v => `<option value="${v}" ${v === n ? 'selected' : ''}>${v === 0 ? '0 – sam wspornik' : v}</option>`).join('')}</select><span></span></div>`;
+  S.geom.przesla.forEach((v, i) => {
+    h += `<div class="row"><label>${n > 1 ? `Przęsło ${i + 1}: rozpiętość` : 'Rozpiętość'} L${n > 1 ? `<sub>${i + 1}</sub>` : '<sub>eff</sub>'}</label><div class="combo"><input data-k="geom.przesla.${i}" value="${esc(showNum(v))}" data-min="0.2" data-re="1" autocomplete="off" spellcheck="false"><button tabindex="-1" type="button" data-list="${esc(JSON.stringify([2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 9, 10, 12, 15, 18, 20]))}" aria-label="lista">▾</button></div><span class="unit">m</span></div>`;
   });
-  b += '</table>';
-  b += `<div class="lhead">Podpory tymczasowe (montażowe) <button class="addb" data-act="addTmp">+ podpora</button></div>`;
-  if (!S.podporyTymczasowe.length) b += hint('Brak. Podpora tymczasowa działa w etapach do „usunięta po” włącznie; jej reakcja jest przenoszona na układ końcowy.');
-  S.podporyTymczasowe.forEach((t, i) => { b += `<div class="lrow"><span class="lid">T${i + 1}</span> x = ${inl(`podporyTymczasowe.${i}.x`, { r: true })}<span class="u">m</span> usunięta po etapie ${ins(`podporyTymczasowe.${i}.usunietaPo`, stageOpts(), { num: true })}<button class="del sm" data-act="delTmp" data-i="${i}">×</button></div>`; });
-  return grp('geom', 'Schemat statyczny i geometria', b);
-}
-
-function grpSec() {
-  const p = S.przekroj;
-  let b = fSel('Rodzaj przekroju', 'przekroj.typ', [['walc', 'kształtownik walcowany (PN-EN 10365)'], ['spaw', 'dwuteownik spawany']], { wide: true });
-  if (p.typ === 'walc') {
-    b += fSel('Seria', 'przekroj.seria', Object.keys(P.SERIE).map(k => [k, k]));
-    if (!P.SERIE[p.seria] || !P.SERIE[p.seria][p.nr]) { p.nr = P.lista(p.seria)[Math.floor(P.lista(p.seria).length / 2)]; }
-    b += fSel('Wielkość', 'przekroj.nr', P.lista(p.seria).map(n => [n, `${p.seria} ${n}`]), { num: true });
-  } else {
-    b += fNum('Wysokość h', 'przekroj.h', 'mm', { r: true }) + fNum('Pas górny b<sub>g</sub>', 'przekroj.bg', 'mm', { r: true }) + fNum('Pas górny t<sub>g</sub>', 'przekroj.tg', 'mm', { r: true });
-    b += fNum('Pas dolny b<sub>d</sub>', 'przekroj.bd', 'mm', { r: true }) + fNum('Pas dolny t<sub>d</sub>', 'przekroj.td', 'mm', { r: true }) + fNum('Środnik t<sub>w</sub>', 'przekroj.tw', 'mm', { r: true }) + fNum('Spoina pas–środnik a', 'przekroj.aw', 'mm', { r: true });
-  }
-  b += fSel('Gatunek stali', 'material.gatunek', Object.keys(M.STAL).map(k => [k, `${k} (${M.STAL[k].norma})`]), { wide: true });
-  const pods = (M.STAL[S.material.gatunek] || { pod: ['JR'] }).pod;
-  if (!pods.includes(S.material.podgatunek)) S.material.podgatunek = pods[pods.length - 1];
-  b += fSel('Podgatunek (udarność)', 'material.podgatunek', pods.map(k => [k, `${k} (27 J w ${M.T27J[k]} °C${k === 'K2' ? ', 40 J w −20 °C' : ''})`]), { wide: true });
-  if (R && R.sec && R.mat) b += hint(`<b>${esc(R.sec.nazwa)}</b>: A = ${U.fmt(R.sec.A / 100, 1)} cm², Iy = ${U.fmt(R.sec.Iy / 1e4, 0)} cm⁴, ${U.fmt(R.sec.masa, 1)} kg/m · fy = ${R.mat.fy} MPa, fu = ${R.mat.fu} MPa (${esc(R.mat.zr)}) · klasa przy zginaniu: ${R.base.kPos.cls}${R.base.kNeg.cls !== R.base.kPos.cls ? '/' + R.base.kNeg.cls : ''}`);
-  b += `<div class="bar"><button class="btn sm" data-act="dobor">Dobierz kształtownik…</button></div>`;
-  return grp('sec', 'Przekrój i materiał', b);
-}
-
-function grpLoads() {
-  let b = '';
-  b += `<div class="lrow">${fChk('ciężar własny belki (automatycznie, 78,5 kN/m³)', 'ciezarWlasny.auto')}</div>`;
-  if (S.ciezarWlasny.auto !== false) b += `<div class="lrow">+ dodatek na połączenia ${inl('ciezarWlasny.dodatek', { cls: 'sm' })}<span class="u">%</span> etap ${ins('ciezarWlasny.etap', stageOpts(), { num: true })}</div>`;
-  b += `<div class="lhead">Przypadki obciążeń <span><button class="addb" data-act="snow">Śnieg…</button> <button class="addb" data-act="addLoad">+ przypadek</button></span></div>`;
-  S.obciazenia.forEach((o, i) => {
-    const p = `obciazenia.${i}`;
-    const psi = BS.K.psi(o);
-    b += `<div class="litem" style="border-left-color:${D.loadColor(o)}">`;
-    b += `<div class="lrow"><span class="lid">${esc(o.id || '')}</span>${inl(p + '.id', { t: 'str', cls: 'sm', title: 'Oznaczenie', r: true })}${inl(p + '.nazwa', { t: 'str', cls: 'lname', title: 'Opis' })}<label class="chk" title="Aktywny"><input type="checkbox" data-p="${p}.aktywne" data-t="boolT" data-r="1"${o.aktywne !== false ? ' checked' : ''}></label><button class="del" data-act="delLoad" data-i="${i}" title="Usuń przypadek">×</button></div>`;
-    b += `<div class="lrow">${ins(p + '.rodzaj', O.rodzaj)}${o.rodzaj === 'Q' ? ins(p + '.kat', O.kat) : ''} etap ${ins(p + '.etap', stageOpts(), { num: true })}</div>`;
-    if (!BS.S.RODZAJE[o.rodzaj].stale && o.rodzaj !== 'A') b += `<div class="lrow">${ins(p + '.uklad', O.uklad)} grupa wykluczająca ${inl(p + '.wyklucz', { t: 'str', cls: 'sm', title: 'Przypadki z tą samą etykietą nie działają jednocześnie (np. W dla kierunków wiatru)' })} <span class="u">ψ0/ψ1/ψ2 = ${psi.map(v => U.fmt(v, 2)).join('/')}</span></div>`;
-    b += `<div class="lrow">siła osiowa N ${inl(p + '.N', { cls: 'sm', title: '+ rozciąganie, − ściskanie' })}<span class="u">kN (+ rozc.)</span></div>`;
-    (o.sklad || []).forEach((k, j) => {
-      const q = `${p}.sklad.${j}`;
-      b += `<div class="lrow comp">${ins(q + '.typ', O.typS)}`;
-      if (k.typ === 'q') b += `${inl(q + '.q0', { title: 'q na początku [kN/m]' })}…${inl(q + '.q1', { t: 'numE', ph: '=q₀', title: 'q na końcu (puste = stałe)' })}<span class="u">kN/m</span> x ${inl(q + '.x0', { cls: 'sm', r: true })}–${inl(q + '.x1', { t: 'numE', cls: 'sm', ph: 'L', r: true })}<span class="u">m</span>`;
-      else if (k.typ === 'P') b += `${inl(q + '.P')}<span class="u">kN</span> x ${inl(q + '.x', { cls: 'sm', r: true })}<span class="u">m</span> ss ${inl(q + '.ss', { cls: 'sm', title: 'długość docisku [mm]' })}<span class="u">mm</span>`;
-      else b += `${inl(q + '.M')}<span class="u">kNm</span> x ${inl(q + '.x', { cls: 'sm', r: true })}<span class="u">m</span>`;
-      if (k.typ !== 'M') b += `${ins(q + '.kier', O.kier)}${k.kier !== 'y' ? ins(q + '.wys', O.wys) : ''}`;
-      b += `<button class="del sm" data-act="delComp" data-i="${i}" data-j="${j}">×</button></div>`;
-    });
-    b += `<div class="lrow"><button class="addp" data-act="addComp" data-i="${i}" data-k="q">+ q</button><button class="addp" data-act="addComp" data-i="${i}" data-k="P">+ P</button><button class="addp" data-act="addComp" data-i="${i}" data-k="M">+ M</button></div>`;
-    b += '</div>';
-  });
-  b += hint('Wartości charakterystyczne. q, P dodatnie – w dół (grawitacyjnie); wiatr ssący – ujemne. Wysokość przyłożenia wpływa na M<sub>cr</sub>.');
-  return grp('load', 'Obciążenia (PN-EN 1991)', b, `<span class="st info">${S.obciazenia.length}</span>`);
-}
-
-function grpStages() {
-  let b = '<div class="lhead">Etapy realizacji <button class="addb" data-act="addStage">+ etap</button></div>';
-  S.etapy.forEach((e, i) => {
-    b += `<div class="litem"><div class="lrow"><span class="lid">${i + 1}</span>${inl(`etapy.${i}.nazwa`, { t: 'str', cls: 'lname', r: true })}${ins(`etapy.${i}.typ`, O.etapTyp)}${S.etapy.length > 1 ? `<button class="del" data-act="delStage" data-i="${i}">×</button>` : ''}</div><div class="lrow">${inl(`etapy.${i}.opis`, { t: 'str', cls: 'lname', ph: 'opis etapu' })}</div></div>`;
-  });
-  b += hint('Etap ostatni = eksploatacja (sytuacja trwała). Obciążenia stałe kumulują się z historią podpór; zmienne działają w etapie, do którego je przypisano.');
-  b += `<div class="lhead">Stężenia boczne/skrętne (dyskretne) <button class="addb" data-act="addBrace">+ stężenie</button></div>`;
-  S.stezenia.forEach((z, i) => {
-    b += `<div class="lrow"><span class="lid">S${i + 1}</span> x ${inl(`stezenia.${i}.x`, { cls: 'sm', r: true })}<span class="u">m</span>${ins(`stezenia.${i}.typ`, O.stez)}${z.typ !== 'skretne' ? ins(`stezenia.${i}.wys`, O.wys.map(([k, l]) => [k, l.replace('na ', '').replace('w ', '')])) : ''} od etapu ${ins(`stezenia.${i}.odEtapu`, stageOpts(), { num: true })}<button class="del sm" data-act="delBrace" data-i="${i}">×</button></div>`;
-  });
-  b += '<div class="sub">Stężenie ciągłe (np. płyta, blacha fałdowa)</div>';
-  b += `<div class="lrow">${fChk('pas górny stężony ciągle', 'stezenieCiagle.pasG')} ${S.stezenieCiagle.pasG ? 'od etapu ' + ins('stezenieCiagle.odEtapu', stageOpts(), { num: true }) : ''}</div>`;
-  b += `<div class="lrow">${fChk('pas dolny stężony ciągle', 'stezenieCiagle.pasD')} ${S.stezenieCiagle.pasD ? 'od etapu ' + ins('stezenieCiagle.odEtapuD', stageOpts(), { num: true }) : ''}</div>`;
-  return grp('stage', 'Etapy realizacji i stężenia', b, S.etapy.length > 1 ? `<span class="st info">${S.etapy.length} etapy</span>` : '');
-}
-
-function grpSup() {
-  let b = '';
-  const ids = 'ABCDEFGHIJKLMNOP';
-  S.podpory.forEach((p, i) => {
-    const w = p.wezel || (p.wezel = { typ: 'brak' }); const q = `podpory.${i}.wezel`;
-    b += `<div class="sub">Podpora ${ids[i]}<span class="sp"></span>${ins(q + '.typ', O.wezel)}</div>`;
-    if (w.typ === 'oparcie' || w.typ === 'brak') {
-      if (w.typ === 'oparcie') {
-        b += fSel('Podłoże', q + '.podloze', [['beton', 'beton (PN-EN 1992-1-1)'], ['mur', 'mur (PN-EN 1996-1-1)'], ['stal', 'element stalowy']], { wide: true });
-        if (w.podloze !== 'stal') {
-          b += `<div class="lrow">płyta b<sub>p</sub> ${inl(q + '.bp', { cls: 'sm' })} × l<sub>p</sub> ${inl(q + '.lp', { cls: 'sm' })} × t<sub>p</sub> ${inl(q + '.tp', { cls: 'sm' })}<span class="u">mm</span> docisk belki l<sub>b</sub> ${inl(q + '.lb', { cls: 'sm' })}<span class="u">mm</span></div>`;
-          if (w.podloze === 'beton') b += `<div class="lrow">beton ${ins(q + '.beton', O.beton)} α = √(A<sub>c1</sub>/A<sub>c0</sub>) ${inl(q + '.alfa', { cls: 'sm', title: '1,0…3,0' })}</div>`;
-          else b += `<div class="lrow">f<sub>d</sub> muru ${inl(q + '.fd', { cls: 'sm' })}<span class="u">MPa</span> β ${inl(q + '.beta', { cls: 'sm', title: 'współczynnik zwiększający 1,0…1,5 (PN-EN 1996-1-1, 6.1.3)' })}</div>`;
-        }
-      }
-      b += `<div class="lrow">${fChk('żebra podporowe (para)', q + '.zebro')}${w.zebro ? ` b<sub>s</sub> ${inl(q + '.bs', { cls: 'sm' })} t<sub>s</sub> ${inl(q + '.ts', { cls: 'sm' })} fazka ${inl(q + '.ch', { cls: 'sm' })}<span class="u">mm</span>` : ''}</div>`;
-    } else if (w.typ === 'blacha_czolowa') {
-      b += `<div class="lrow">blacha h<sub>p</sub> ${inl(q + '.hp', { cls: 'sm' })} b<sub>p</sub> ${inl(q + '.bp', { cls: 'sm' })} t<sub>p</sub> ${inl(q + '.tp', { cls: 'sm' })}<span class="u">mm</span> spoina a ${inl(q + '.a', { cls: 'sm' })}<span class="u">mm</span></div>`;
-      b += `<div class="lrow">śruby 2 × ${inl(q + '.nr', { cls: 'sm', title: 'liczba rzędów' })} rz. ${ins(q + '.d', O.sruby)} kl. ${ins(q + '.kl', O.klasy)} ${fChk('gwint w płaszczyźnie ścinania', q + '.gwint')}</div>`;
-      b += `<div class="lrow">e<sub>1</sub> ${inl(q + '.e1', { cls: 'sm' })} p<sub>1</sub> ${inl(q + '.p1', { cls: 'sm' })} e<sub>2</sub> ${inl(q + '.e2', { cls: 'sm' })} p<sub>3</sub> ${inl(q + '.p3', { cls: 'sm', title: 'rozstaw poprzeczny śrub' })}<span class="u">mm</span></div>`;
-      b += `<div class="lrow">element podpierający: t ${inl(q + '.tsup', { cls: 'sm' })}<span class="u">mm</span> f<sub>u</sub> ${inl(q + '.fusup', { cls: 'sm' })}<span class="u">MPa</span></div>`;
-    } else if (w.typ === 'blacha_zebrowa') {
-      b += `<div class="lrow">blacha h<sub>p</sub> ${inl(q + '.hp', { cls: 'sm' })} t<sub>p</sub> ${inl(q + '.tp', { cls: 'sm' })}<span class="u">mm</span> spoiny a ${inl(q + '.a', { cls: 'sm' })}<span class="u">mm</span></div>`;
-      b += `<div class="lrow">śruby ${inl(q + '.n', { cls: 'sm', title: 'liczba śrub w jednym rzędzie pionowym' })} × ${ins(q + '.d', O.sruby)} kl. ${ins(q + '.kl', O.klasy)} ${fChk('gwint w płaszczyźnie ścinania', q + '.gwint')}</div>`;
-      b += `<div class="lrow">e<sub>1</sub> ${inl(q + '.e1', { cls: 'sm' })} p<sub>1</sub> ${inl(q + '.p1', { cls: 'sm' })} e<sub>2</sub> ${inl(q + '.e2', { cls: 'sm' })} z ${inl(q + '.z', { cls: 'sm', title: 'od lica podpory do osi śrub' })} e<sub>2,b</sub> ${inl(q + '.e2b', { cls: 'sm', title: 'od osi śrub do końca belki' })}<span class="u">mm</span></div>`;
-    }
-  });
-  b += hint('Połączenia przegubowe sprawdzane na maksymalną reakcję SGN. Węzły momentowe (sztywne) – poza zakresem tej wersji.');
-  return grp('sup', 'Podpory i połączenia (PN-EN 1993-1-8)', b);
-}
-
-function grpSGU() {
-  let b = fSel('Rodzaj elementu', 'sgu.typ', O.ugi, { wide: true });
-  b += fNum('Ugięcie graniczne w<sub>max</sub> = L /', 'sgu.wmax', '') + fNum('Ugięcie od zmiennych w<sub>3</sub> = L /', 'sgu.w3', '');
-  b += fSel('Podniesienie wykonawcze w<sub>c</sub>', 'sgu.podniesienie', [['brak', 'brak'], ['auto', 'równe ugięciu od G'], ['wartosc', 'zadana strzałka']], { wide: true });
-  if (S.sgu.podniesienie === 'wartosc') b += fNum('Strzałka w<sub>c</sub>', 'sgu.wc', 'mm');
-  b += fChk('sprawdź częstotliwość drgań własnych', 'sgu.drgania');
-  if (S.sgu.drgania !== false) b += fNum('Częstotliwość minimalna f<sub>min</sub>', 'sgu.fmin', 'Hz');
-  b += fNum('Przemieszczenie poziome u = L /', 'sgu.uLim', '');
-  b += hint('Wspornik: L = 2·L<sub>w</sub>. Kryteria SGU uzgadnia się z inwestorem (PN-EN 1990, A1.4) – wartości domyślne do weryfikacji z ZK do PN-EN 1993-1-1.');
-  return grp('sgu', 'Użytkowalność (SGU)', b);
-}
-
-function grpAnal() {
-  let b = fNum('Współczynnik długości wyboczeniowej μ<sub>y</sub>', 'analiza.muY', '') + fNum('Współczynnik długości wyboczeniowej μ<sub>z</sub>', 'analiza.muZ', '');
-  b += fNum('Rozstaw żeber pośrednich a (0 – brak)', 'analiza.zebraRozstaw', 'm');
-  b += fChk('sztywny słupek podporowy (wyboczenie przy ścinaniu)', 'analiza.slupekSztywny');
-  b += hint('M<sub>cr</sub> wyznaczany MES (u, u′, φ, φ′) dla rzeczywistego rozkładu M<sub>y</sub> w każdym etapie, z uwzględnieniem wysokości przyłożenia obciążeń, monosymetrii i stężeń. χ<sub>LT</sub> i kombinacja – wg NDP profilu.');
-  return grp('anal', 'Analiza i stateczność', b);
-}
-
-function grpFire() {
-  let b = fChk('sprawdź nośność ogniową (PN-EN 1993-1-2)', 'pozar.aktywny');
-  if (S.pozar.aktywny) {
-    b += fNum('Wymagana klasa R', 'pozar.R', 'min');
-    b += fSel('Nagrzewanie', 'pozar.ekspozycja', [['3', 'z 3 stron (płyta na pasie górnym)'], ['4', 'z 4 stron']], { wide: true });
-    b += fSel('Zabezpieczenie', 'pozar.ochrona', [['brak', 'brak'], ['plyty', 'okładzina płytowa (skrzynkowa)'], ['natrysk', 'natrysk/powłoka (konturowa)']], { wide: true });
-    if (S.pozar.ochrona !== 'brak') b += `<div class="lrow">λ<sub>p</sub> ${inl('pozar.lp', { cls: 'sm' })}<span class="u">W/mK</span> d<sub>p</sub> ${inl('pozar.dp', { cls: 'sm' })}<span class="u">mm</span> c<sub>p</sub> ${inl('pozar.cp', { cls: 'sm' })}<span class="u">J/kgK</span> ρ<sub>p</sub> ${inl('pozar.rp', { cls: 'sm' })}<span class="u">kg/m³</span></div>`;
-    b += fNum('κ<sub>1</sub> (puste – automatycznie)', 'pozar.kappa1', '', { empty: true });
-  }
-  return grp('fire', 'Pożar', b, S.pozar.aktywny ? `<span class="st info">R${S.pozar.R}</span>` : '');
-}
-
-function grpFat() {
-  let b = fChk('sprawdź zmęczenie (PN-EN 1993-1-9)', 'zmeczenie.aktywny');
-  if (S.zmeczenie.aktywny) {
-    b += '<div class="lrow">przypadki cykliczne: ' + S.obciazenia.filter(o => !BS.S.RODZAJE[o.rodzaj].stale).map(o => `<label class="chk"><input type="checkbox" data-act="fatCase" data-id="${esc(o.id)}"${(S.zmeczenie.przypadki || []).includes(o.id) ? ' checked' : ''}> ${esc(o.id)}</label>`).join(' ') + '</div>';
-    b += fNum('Liczba cykli n w okresie użytkowania', 'zmeczenie.n', '') + fNum('Współczynnik dynamiczny φ', 'zmeczenie.phi', '');
-    b += fChk('obciążenie zmienia znak (zakres ×2)', 'zmeczenie.zmiennyZnak');
-    b += fSel('Metoda oceny', 'zmeczenie.ocena', [['tolerancja', 'tolerancji uszkodzeń'], ['bezpieczna', 'bezpiecznego okresu użytkowania']], { wide: true });
-    b += fSel('Skutki zniszczenia', 'zmeczenie.skutki', [['male', 'małe'], ['duze', 'duże']], { wide: true });
-    b += `<div class="lhead">Szczegóły konstrukcyjne <button class="addb" data-act="addDet">+ szczegół</button></div>`;
-    (S.zmeczenie.detale || []).forEach((d, i) => { b += `<div class="lrow">${ins(`zmeczenie.detale.${i}.k`, BS.X.DETALE.map(q => [q.k, q.n]))}${ins(`zmeczenie.detale.${i}.miejsce`, [['pas_d', 'pas dolny'], ['pas_g', 'pas górny'], ['spoina_d', 'styk pas d.–środnik'], ['spoina_g', 'styk pas g.–środnik']])}${d.k === 'user' ? ` Δσ<sub>c</sub> ${inl(`zmeczenie.detale.${i}.dc`, { cls: 'sm' })}` : ''}<button class="del sm" data-act="delDet" data-i="${i}">×</button></div>`; });
-    b += fNum('Δτ<sub>c</sub> środnika', 'zmeczenie.dtc', 'MPa');
-  }
-  return grp('fat', 'Zmęczenie', b);
-}
-
-function grpBrittle() {
-  let b = fNum('Temperatura minimalna T<sub>md</sub>', 'kruche.Tmd', '°C') + fNum('ΔT<sub>r</sub> (promieniowanie)', 'kruche.dTr', 'K') + fNum('ΔT<sub>ε̇</sub> (prędkość odkształceń)', 'kruche.dTeps', 'K') + fNum('ΔT<sub>εcf</sub> (zgniot)', 'kruche.dTcf', 'K');
-  b += fNum('σ<sub>Ed</sub>/f<sub>y</sub>(t) dla blach połączeń', 'kruche.plyty', '');
-  b += hint('T<sub>md</sub> – z mapy temperatur minimalnych ZK do PN-EN 1991-1-5 (wnętrze ogrzewane – można przyjąć wyższą). ΔT<sub>R</sub> – z profilu normowego.');
-  b += fChk('wymagania w kierunku grubości (klasa Z)', 'kruche.z.aktywny');
-  if (S.kruche.z.aktywny) b += `<div class="lrow">a<sub>eff</sub> ${inl('kruche.z.a', { cls: 'sm' })}<span class="u">mm</span> Z<sub>b</sub> ${inl('kruche.z.Zb', { cls: 'sm', title: 'wg tabl. 3.2 b)' })} s ${inl('kruche.z.s', { cls: 'sm' })}<span class="u">mm</span> Z<sub>d</sub> ${ins('kruche.z.Zd', [[0, '0 – małe'], [3, '3 – średnie'], [5, '5 – duże']], { num: true })} Z<sub>e</sub> ${ins('kruche.z.Ze', [[0, '0 – bez podgrzewania'], [-8, '−8 – podgrzewanie ≥ 100 °C']], { num: true })}</div>`;
-  return grp('brit', 'Kruche pękanie (PN-EN 1993-1-10)', b);
-}
-
-function grpExec() {
-  let b = fSel('Klasa konsekwencji', 'wykonanie.CC', [['CC1', 'CC1'], ['CC2', 'CC2'], ['CC3', 'CC3']]);
-  b += fSel('Klasa wykonania', 'wykonanie.EXC', [['auto', 'automatycznie (zał. C)'], ['EXC1', 'EXC1'], ['EXC2', 'EXC2'], ['EXC3', 'EXC3'], ['EXC4', 'EXC4']], { wide: true });
-  if (S.wykonanie.EXC !== 'auto') b += fTxt('Uzasadnienie', 'wykonanie.uzasadnienie');
-  b += fSel('Korozyjność (PN-EN ISO 12944-2)', 'wykonanie.korozja', ['C1', 'C2', 'C3', 'C4', 'C5', 'CX'].map(k => [k, k]));
-  b += fSel('Trwałość ochrony', 'wykonanie.trwalosc', [['L', 'L (≤ 7 lat)'], ['M', 'M (7–15 lat)'], ['H', 'H (15–25 lat)'], ['VH', 'VH (> 25 lat)']], { wide: true });
-  b += fTxt('Uwagi wykonawcze', 'wykonanie.uwagi', { area: true });
-  return grp('exec', 'Wykonanie (PN-EN 1090-2)', b, R && R.exc ? `<span class="st info">${R.exc.exc}</span>` : '');
-}
-
-function grpMeta() {
-  let b = fTxt('Obiekt', 'meta.obiekt') + fTxt('Projektant', 'meta.projektant') + fTxt('Nr uprawnień', 'meta.nrUprawnien') + fTxt('Sprawdzający', 'meta.sprawdzajacy') + fTxt('Data opracowania', 'meta.data', { type: 'date' }) + fTxt('Opis elementu', 'meta.opis', { area: true });
-  return grp('meta', 'Metryka opracowania', b);
-}
-
-/* ---------------------------------------------------------- panel boczny: schemat */
-function renderSide() {
-  const el = $('#dataside'); if (!el) return;
-  if (!R || !R.md) { el.innerHTML = `<div class="box">${(R && R.errors.length) ? R.errors.map(e => `<div class="msg err">${esc(e)}</div>`).join('') : '<p class="hint">Brak modelu.</p>'}</div>`; return; }
-  const s = vStage === null ? R.md.nE - 1 : Math.min(vStage, R.md.nE - 1);
-  let h = '<div class="box">';
-  h += `<div class="bar"><b class="h2" style="margin:0">Schemat statyczny i obciążenia</b><span class="sp"></span>${stageSeg(s)}</div>`;
-  h += D.scheme(S, R.md, { etap: s, width: 760 });
-  h += hint(`${esc(R.md.etapy[s].nazwa)} – ${R.md.etapy[s].typ === 'montaz' ? 'sytuacja przejściowa' : 'sytuacja trwała'}. Kółko – stężenie boczne (krzyżyk – skrętne/pełne); linia przerywana – stężenie ciągłe.`);
-  h += '</div>';
-  if (R.env && R.env[s]) {
-    const sup = R.md.systems[s].map(p => p.x);
-    h += `<div class="box">${D.plot({ xs: R.an.xs, L: R.md.L, width: 760, height: 170, title: 'Obwiednia M_Ed [kNm] – SGN', unit: 'kNm', scale: 1e-6, sup, series: [{ y: R.env[s].Mmax, col: D.C.M, fill: true }, { y: R.env[s].Mmin, col: D.C.M, fill: true }] })}</div>`;
-  }
-  h += summaryBox();
-  el.innerHTML = h;
-}
-function stageSeg(s) {
-  if (!R || !R.md || R.md.nE < 2) return '';
-  return `<span class="seg">${R.md.etapy.map((e, i) => `<button data-act="stage" data-i="${i}" class="${i === s ? 'on' : ''}" title="${esc(e.nazwa)}">Etap ${i + 1}</button>`).join('')}</span>`;
-}
-function summaryBox() {
-  if (!R || !R.checks) return '';
-  const g = R.gov;
-  let h = '<div class="box"><h4>Wynik</h4>';
-  if (R.errors.length) h += R.errors.map(e => `<div class="msg err">${esc(e)}</div>`).join('');
-  h += `<div class="chips">${chipsHTML()}</div>`;
-  if (g) h += `<p style="margin:0">Decyduje: <b>${esc(g.n)}</b> (${esc(g.ref)}) – wytężenie <b>${U.pct(g.util)}</b>${g.combo ? `<br><span class="hint">${esc(g.combo)}</span>` : ''}</p>`;
-  h += '</div>';
   return h;
 }
-function chipsHTML() {
-  if (!R || !R.checks) return '';
-  const groups = {};
-  R.checks.filter(c => !c.info).forEach(c => { const k = c.grp.replace(/ – etap \d+/, '').replace(/ – podpora .*/, ''); const g = groups[k] || (groups[k] = { u: 0, st: 'ok' }); if (c.util > g.u) g.u = c.util; if (c.status === 'fail') g.st = 'fail'; else if (c.status === 'warn' && g.st !== 'fail') g.st = 'warn'; });
-  return Object.keys(groups).map(k => `<span class="chip ${groups[k].st}" data-act="tab" data-tab="sum">${groups[k].st === 'fail' ? '✖' : groups[k].st === 'warn' ? '!' : '✔'} ${esc(k)} <b>${isFinite(groups[k].u) ? U.pct(groups[k].u) : '∞'}</b></span>`).join('');
-}
 
-/* ================================================================ OBLICZENIA */
-let tmr = null;
-function schedule(ms) { clearTimeout(tmr); $('#busy').style.display = 'block'; tmr = setTimeout(recalc, ms === undefined ? 300 : ms); }
-function recalc() {
-  try { R = J.run(S); } catch (e) { console.error(e); R = { errors: ['Błąd obliczeń: ' + e.message], warnings: [], checks: [] }; }
-  $('#busy').style.display = 'none';
-  Object.keys(rendered).forEach(k => { rendered[k] = false; });
-  updStatus(); renderSide(); refreshBadges();
-  if (tab !== 'data') renderTab(tab);
-}
-A.recalc = recalc;
-function refreshBadges() {
-  // odświeża podsumowania w grupach bez przebudowy pól (np. klasa przekroju, EXC)
-  $$('#inputs details.grp').forEach(d => {
-    const id = d.dataset.g;
-    if (['norm', 'sec', 'exec'].includes(id)) {
-      const tmp = document.createElement('div');
-      tmp.innerHTML = ({ norm: grpNorm, sec: grpSec, exec: grpExec })[id]();
-      const nd = tmp.firstElementChild; nd.open = d.open;
-      if (document.activeElement && d.contains(document.activeElement)) return;
-      d.replaceWith(nd);
+/* ================================================================ POLA FORMULARZA */
+const optsOf = (f) => (typeof f.o === 'function' ? f.o(S) : f.o);
+function hintHTML(f) { const h = f.h(S); if (!h) return ''; return f.ex ? exDetails(h, f.exT) : h; }
+function fieldsHTML(items, gid) {
+  let html = '';
+  items.forEach((f, i) => {
+    if (f.show && !f.show(S)) return;
+    const id = `f_${gid}_${i}`;
+    if (f.t === 'hint') { const h = hintHTML(f); if (h) html += `<div class="hint">${h}</div>`; return; }
+    if (f.t === 'sub') { html += `<div class="lsub">${sym(f.l)}</div>`; return; }
+    if (f.t === 'html') { html += f.h(S); return; }
+    if (f.t === 'spans') { html += spansHTML(); return; }
+    if (f.t === 'sel') {
+      const v = getP(S, f.k), num = typeof f.num === 'function' ? f.num() : f.num;
+      const sel = optsOf(f).map(([val, lab]) => `<option value="${esc(val)}" ${String(val) === String(v) ? 'selected' : ''}>${esc(lab)}</option>`).join('');
+      html += `<div class="row ${f.wide ? 'wide' : ''}"><label for="${id}">${sym(f.l)}</label><select id="${id}" data-k="${f.k}" data-num="${num ? 1 : ''}" data-re="${f.re ? 1 : ''}">${sel}</select>${f.wide ? '' : '<span></span>'}</div>`;
+    } else if (f.t === 'num') {
+      const v = getP(S, f.k), list = typeof f.list === 'function' ? f.list() : (f.list || []);
+      html += `<div class="row"><label for="${id}">${sym(f.l)}</label><div class="combo"><input id="${id}" data-k="${f.k}" value="${esc(showNum(v))}" ${f.ph ? `placeholder="${esc(f.ph)}"` : ''} data-opt="${f.opt ? 1 : ''}" data-min="${f.min !== undefined ? f.min : ''}" data-max="${f.max !== undefined ? f.max : ''}" data-re="${f.re ? 1 : ''}" autocomplete="off" spellcheck="false"><button tabindex="-1" type="button" data-list="${esc(JSON.stringify(list))}" aria-label="lista">▾</button></div><span class="unit">${f.u || ''}</span></div>`;
+    } else if (f.t === 'txt') {
+      html += `<div class="row wide"><label for="${id}">${sym(f.l)}</label><input class="txt" id="${id}" data-kt="${f.k}" value="${esc(getP(S, f.k) || '')}" spellcheck="false" autocomplete="off"></div>`;
+    } else if (f.t === 'chk') {
+      html += `<label class="chk"><input type="checkbox" data-k="${f.k}" data-re="${f.re ? 1 : ''}" ${getP(S, f.k) ? 'checked' : ''}><span>${sym(f.l)}</span></label>`;
     }
   });
+  return html;
 }
-function updStatus() {
-  const st = $('#status');
-  if (!R) { st.textContent = '…'; st.className = ''; return; }
-  if (R.errors.length) { st.textContent = `✖ Błędy danych: ${R.errors.length}`; st.className = 'fail'; }
-  else if (R.nFail) { st.textContent = `✖ Niespełnione warunki: ${R.nFail}`; st.className = 'fail'; }
-  else if (R.nWarn) { st.textContent = `! Ostrzeżenia: ${R.nWarn} · max ${U.pct(R.uMax)}`; st.className = 'warn'; }
-  else { st.textContent = `✔ Warunki spełnione · max ${U.pct(R.uMax)}`; st.className = 'ok'; }
+A.fieldsHTML = fieldsHTML;
+let openG = null;
+function isOpen(g) {
+  if (!openG) { try { openG = JSON.parse(localStorage.getItem('bs.grp') || 'null'); } catch (e) { openG = null; } }
+  if (openG && g.id in openG) return openG[g.id];
+  return !g.closed;
 }
+function renderInputs() {
+  const el = $('#inputs'); if (!el) return;
+  const sc = el.closest('.dleft') ? el.closest('.dleft').scrollTop : 0;
+  el.innerHTML = GROUPS.filter(g => !g.show || g.show(S)).map(g => `<details class="grp" data-g="${g.id}" ${isOpen(g) ? 'open' : ''}><summary>${esc(g.title)}</summary><div class="fields">${fieldsHTML(g.items, g.id)}</div></details>`).join('');
+  bindFields(el);
+  $$('details.grp', el).forEach(d => d.addEventListener('toggle', () => { openG = openG || {}; openG[d.dataset.g] = d.open; try { localStorage.setItem('bs.grp', JSON.stringify(openG)); } catch (e) { /* */ } }));
+  renderAutoBar(); renderDsum(); renderDataSide();
+  if (el.closest('.dleft')) el.closest('.dleft').scrollTop = sc;
+}
+A.renderInputs = renderInputs;
 
-/* ================================================================ ZDARZENIA FORMULARZA */
-function onInput(e) {
-  const el = e.target; const p = el.dataset && el.dataset.p; if (!p) return;
-  const t = el.dataset.t;
-  let v;
-  if (t === 'bool') v = el.checked; else if (t === 'boolT') v = el.checked;
-  else if (t === 'num') { v = U.num(el.value, NaN); el.classList.toggle('bad', isNaN(v) && el.value.trim() !== ''); if (isNaN(v)) return; }
-  else if (t === 'numE') { if (el.value.trim() === '') v = ''; else { v = U.num(el.value, NaN); el.classList.toggle('bad', isNaN(v)); if (isNaN(v)) return; } }
-  else v = el.value;
-  if (el.tagName === 'SELECT' && t === 'num') v = +el.value;
-  setP(p, v);
-  side(p, v);
-  markDirty();
-  if (el.dataset.r === '1' && e.type === 'change') { const sc = $('#inputs').closest('.pane').scrollTop; renderInputs(); $('#inputs').closest('.pane').scrollTop = sc; }
-  schedule(e.type === 'change' ? 50 : 350);
-}
-// skutki uboczne zmian (zależności pól)
-function side(p, v) {
-  if (p === 'geom.przesla' || p.startsWith('geom.')) syncSupports();
-  if (p === 'sgu.typ' && N.UGIECIA[v]) { S.sgu.wmax = N.UGIECIA[v].wmax; S.sgu.w3 = N.UGIECIA[v].w3; }
-  if (p === 'przekroj.typ' && v === 'spaw') Object.assign(S.przekroj, { h: S.przekroj.h || 600, bg: S.przekroj.bg || 250, tg: S.przekroj.tg || 16, bd: S.przekroj.bd || 250, td: S.przekroj.td || 16, tw: S.przekroj.tw || 8, aw: S.przekroj.aw || 4 });
-  if (p === 'przekroj.typ' && v === 'walc') { S.przekroj.seria = S.przekroj.seria || 'IPE'; S.przekroj.nr = S.przekroj.nr || 300; }
-  if (p === 'przekroj.seria') S.przekroj.nr = P.lista(v)[Math.floor(P.lista(v).length / 2)];
-  if (p === 'meta.nazwa') updateTitle();
-  if (/^podpory\.\d+\.wezel\.typ$/.test(p)) {
-    const i = +p.split('.')[1], w = S.podpory[i].wezel;
-    const def = { oparcie: { podloze: 'beton', bp: 200, lp: 150, tp: 15, beton: 'C25/30', alfa: 1.5, lb: 150, fd: 2.0, beta: 1.2, zebro: false, bs: 70, ts: 10, ch: 15 }, blacha_czolowa: { hp: Math.round(0.65 * ((R && R.sec && R.sec.h) || 300) / 10) * 10, bp: 150, tp: 10, nr: 2, d: 'M16', kl: '8.8', e1: 40, p1: 70, e2: 30, p3: 90, a: 4, tsup: 12, fusup: 510, gwint: true }, blacha_zebrowa: { hp: Math.round(0.65 * ((R && R.sec && R.sec.h) || 300) / 10) * 10, tp: 10, n: 3, d: 'M20', kl: '8.8', e1: 40, p1: 70, e2: 40, z: 60, e2b: 40, a: 6, gwint: true }, brak: { zebro: false, bs: 70, ts: 10, ch: 15 } }[v] || {};
-    Object.keys(def).forEach(k => { if (w[k] === undefined) w[k] = def[k]; });
+/* skutki zmian wybranych pól */
+function onSet(k, v) {
+  if (k === 'schemat' && v !== 'wlasny') { J.applyScheme(S, v); selSpans.clear(); }
+  if (/^geom\./.test(k) || k === 'nspan') { syncSupports(); if (k !== 'schemat') S.schemat = schemeOf(); }
+  if (k === 'sgu.typ' && N.UGIECIA[v]) { S.sgu.wmax = N.UGIECIA[v].wmax; S.sgu.w3 = N.UGIECIA[v].w3; }
+  if (k === 'przekroj.typ') {
+    const d = S.przekroj;
+    if (v === 'walc') Object.assign(d, { seria: 'IPE', nr: 300 });
+    else if (v === 'ceow') Object.assign(d, { seria: 'UPN', nr: 200 });
+    else if (v === 'kat') Object.assign(d, { seria: 'L', nr: '100x10', poz: d.poz || 'dol' });
+    else if (v === 'rura') Object.assign(d, { seria: 'RHS', nr: '200x100x8', wyk: d.wyk || 'gor', h: d.h || 200, b: d.b || 100, t: d.t || 8 });
+    else if (v === 'spaw') Object.assign(d, { h: U.num(d.h) > 200 ? d.h : 600, bg: d.bg || 250, tg: d.tg || 16, bd: d.bd || 250, td: d.td || 16, tw: d.tw || 8, aw: d.aw || 4 });
   }
+  if (k === 'przekroj.seria') { const L = P.lista(v); if (L.length && !L.map(String).includes(String(S.przekroj.nr))) S.przekroj.nr = L[Math.floor(L.length / 2)]; }
+  if (k === 'material.gatunek') { const pods = (M.STAL[v] || { pod: ['JR'] }).pod; if (!pods.includes(S.material.podgatunek)) S.material.podgatunek = pods[pods.length - 1]; }
 }
+function schemeOf() {
+  const g = S.geom, n = g.przesla.length, wl = U.num(g.wspL) > 0, wp = U.num(g.wspP) > 0, t = S.podpory.map(p => p.typ);
+  const allP = t.every(x => x === 'przegub');
+  if (n === 1 && !wl && !wp && allP && !(S.podporyTymczasowe || []).length) return 'swob';
+  if (n === 0 && wp && t[0] === 'utwierdzenie') return 'wspornik';
+  if (n === 1 && !wl && wp && allP) return 'wspP';
+  if (n === 1 && wl && wp && allP) return 'wsp2';
+  if (n === 1 && !wl && !wp && t[0] === 'utwierdzenie' && t[1] === 'przegub') return 'utwprz';
+  if (n === 1 && !wl && !wp && t[0] === 'utwierdzenie' && t[1] === 'utwierdzenie') return 'utwutw';
+  if (n >= 2 && n <= 4 && !wl && !wp && allP) return 'c' + n;
+  return 'wlasny';
+}
+A.schemeOf = schemeOf;
 function syncSupports() {
   const n = S.geom.przesla.length + 1;
   while (S.podpory.length < n) S.podpory.push({ typ: 'przegub', ltb: 'widelkowe', ss: 100, c: 0, wezel: { typ: 'brak' } });
   S.podpory.length = n;
 }
-function onClick(e) {
-  const b = e.target.closest('[data-act]'); if (!b) return;
-  const act = b.dataset.act, i = +b.dataset.i;
-  const re = () => { renderInputs(); markDirty(); schedule(30); };
-  switch (act) {
-    case 'addSpan': S.geom.przesla.push(S.geom.przesla[S.geom.przesla.length - 1] || 6); syncSupports(); re(); break;
-    case 'delSpan': S.geom.przesla.splice(i, 1); syncSupports(); re(); break;
-    case 'addTmp': S.podporyTymczasowe.push({ x: (U.sum(S.geom.przesla) + U.num(S.geom.wspL)) / 2, usunietaPo: Math.max(0, S.etapy.length - 2), ss: 100 }); re(); break;
-    case 'delTmp': S.podporyTymczasowe.splice(i, 1); re(); break;
-    case 'addLoad': { const n = S.obciazenia.length + 1; S.obciazenia.push({ id: 'Q' + n, nazwa: 'Nowe obciążenie', rodzaj: 'Q', kat: 'Q-B', etap: S.etapy.length - 1, uklad: 'staly', wyklucz: '', N: 0, sklad: [{ typ: 'q', q0: 5, q1: '', x0: 0, x1: '', kier: 'z', wys: 'pas_g' }] }); re(); break; }
-    case 'delLoad': S.obciazenia.splice(i, 1); re(); break;
-    case 'addComp': { const k = b.dataset.k; const c = k === 'q' ? { typ: 'q', q0: 5, q1: '', x0: 0, x1: '', kier: 'z', wys: 'pas_g' } : k === 'P' ? { typ: 'P', P: 10, x: (U.sum(S.geom.przesla) + U.num(S.geom.wspL)) / 2, kier: 'z', wys: 'pas_g', ss: 100 } : { typ: 'M', M: 10, x: 0 }; S.obciazenia[i].sklad.push(c); re(); break; }
-    case 'delComp': S.obciazenia[i].sklad.splice(+b.dataset.j, 1); re(); break;
-    case 'addStage': S.etapy.splice(S.etapy.length - 1, 0, { id: 'E' + (S.etapy.length + 1), nazwa: 'Montaż – etap ' + S.etapy.length, typ: 'montaz', opis: '' }); shiftStages(S.etapy.length - 2, +1); re(); break;
-    case 'delStage': S.etapy.splice(i, 1); shiftStages(i, -1); re(); break;
-    case 'addBrace': S.stezenia.push({ x: (U.sum(S.geom.przesla) + U.num(S.geom.wspL)) / 2, typ: 'boczne', wys: 'pas_g', odEtapu: 0, bocznieY: true }); re(); break;
-    case 'delBrace': S.stezenia.splice(i, 1); re(); break;
-    case 'addDet': S.zmeczenie.detale.push({ k: 'w80', miejsce: 'pas_d' }); re(); break;
-    case 'delDet': S.zmeczenie.detale.splice(i, 1); re(); break;
-    case 'fatCase': { const id = b.dataset.id, L = S.zmeczenie.przypadki || (S.zmeczenie.przypadki = []); if (b.checked) { if (!L.includes(id)) L.push(id); } else L.splice(L.indexOf(id), 1); markDirty(); schedule(30); break; }
-    case 'stage': vStage = i; renderSide(); if (tab !== 'data') { rendered[tab] = false; renderTab(tab); } break;
-    case 'tab': selectTab(b.dataset.tab); break;
-    case 'normy': dlgNormy(); break;
-    case 'dobor': dlgDobor(); break;
-    case 'snow': dlgSnow(); break;
-    default: if (A.acts[act]) A.acts[act](b, e);
-  }
+A.syncSupports = syncSupports;
+function numInput(el, final) {
+  const raw = el.value.trim(), opt = !!el.dataset.opt;
+  const min = el.dataset.min !== '' && el.dataset.min !== undefined ? parseFloat(el.dataset.min) : null, max = el.dataset.max ? parseFloat(el.dataset.max) : null;
+  if (raw === '' && opt) { el.classList.remove('bad'); setP(S, el.dataset.k, ''); changed(final && !!el.dataset.re); return; }
+  const v = parseNum(raw);
+  const bad = v === null || (min !== null && v < min) || (max !== null && v > max);
+  el.classList.toggle('bad', bad);
+  if (bad) return;
+  setP(S, el.dataset.k, v); onSet(el.dataset.k, v);
+  if (final) el.value = showNum(v);
+  changed(final && !!el.dataset.re);
 }
-function shiftStages(from, d) {
-  const n = S.etapy.length;
-  const fix = (v) => U.clamp((v > from || (d > 0 && v >= from)) ? v + d : v, 0, n - 1);
-  S.obciazenia.forEach(o => { o.etap = fix(U.num(o.etap)); });
-  S.stezenia.forEach(z => { z.odEtapu = fix(U.num(z.odEtapu)); });
-  S.podporyTymczasowe.forEach(t => { t.usunietaPo = U.clamp(fix(U.num(t.usunietaPo)), 0, Math.max(0, n - 2)); });
-  S.ciezarWlasny.etap = fix(U.num(S.ciezarWlasny.etap));
+A.numInput = numInput;
+// wiązanie pól (dane i okna): select[data-k], .combo input[data-k], checkbox[data-k], input[data-kt]
+function bindFields(host, after) {
+  const done = (re) => { if (after) after(re); };
+  $$('select[data-k]', host).forEach(el => el.addEventListener('change', () => {
+    let v = el.value; if (el.dataset.num) v = parseNum(v);
+    setP(S, el.dataset.k, v); onSet(el.dataset.k, v); changed(!!el.dataset.re); done(!!el.dataset.re);
+  }));
+  $$('.combo input[data-k]', host).forEach(el => {
+    el.addEventListener('input', () => { numInput(el, false); done(false); });
+    el.addEventListener('change', () => { numInput(el, true); done(!!el.dataset.re); });
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') { numInput(el, true); done(!!el.dataset.re); } });
+  });
+  $$('.combo button', host).forEach(b => b.addEventListener('click', () => Q.openList(b, inp => { numInput(inp, true); done(!!inp.dataset.re); })));
+  $$('input[type=checkbox][data-k]', host).forEach(el => el.addEventListener('change', () => { setP(S, el.dataset.k, el.checked); onSet(el.dataset.k, el.checked); changed(!!el.dataset.re); done(!!el.dataset.re); }));
+  $$('input[data-kt], textarea[data-kt]', host).forEach(el => el.addEventListener('input', () => { setP(S, el.dataset.kt, el.value); changed(false); done(false); }));
+  const ns = $('select[data-nspan]', host);
+  if (ns) ns.addEventListener('change', () => { const n = +ns.value, g = S.geom; while (g.przesla.length < n) g.przesla.push(g.przesla[g.przesla.length - 1] || 6); g.przesla.length = n; if (n === 0 && !(U.num(g.wspL) > 0) && !(U.num(g.wspP) > 0)) g.wspP = 2; syncSupports(); if (n === 0) { S.podpory[0].typ = 'utwierdzenie'; S.podpory[0].ltb = 'pelne'; } S.schemat = schemeOf(); selSpans.clear(); changed(true); });
+  $$('[data-fatc]', host).forEach(cb => cb.addEventListener('change', () => { const L = S.zmeczenie.przypadki || (S.zmeczenie.przypadki = []); const id = cb.dataset.fatc; if (cb.checked) { if (!L.includes(id)) L.push(id); } else L.splice(L.indexOf(id), 1); changed(false); }));
+  $$('[data-fd]', host).forEach(el => el.addEventListener('change', () => { const d = S.zmeczenie.detale[+el.dataset.fd]; d[el.dataset.fk] = el.dataset.fk === 'dc' ? parseNum(el.value) : el.value; changed(el.tagName === 'SELECT'); }));
+  $$('[data-fdel]', host).forEach(b => b.addEventListener('click', () => { S.zmeczenie.detale.splice(+b.dataset.fdel, 1); changed(true); }));
+  $$('[data-fadd]', host).forEach(b => b.addEventListener('click', () => { (S.zmeczenie.detale = S.zmeczenie.detale || []).push({ k: 'w80', miejsce: 'pas_d' }); changed(true); }));
 }
-A.acts = {};
+A.bindFields = bindFields;
 
-/* ================================================================ DIALOGI */
-function modal(html, cls) { const m = $('#modal'); m.innerHTML = `<div class="dlg ${cls || ''}" role="document">${html}</div>`; m.classList.add('on'); const f = m.querySelector('input,select,button'); if (f) f.focus(); }
-function closeModal() { $('#modal').classList.remove('on'); $('#modal').innerHTML = ''; }
-A.modal = modal; A.closeModal = closeModal;
-function ask(msg, title) { return new Promise(res => { modal(`<h3>${esc(title || 'Potwierdź')}</h3><p>${esc(msg)}</p><div class="dbtn"><button class="btn" id="aN">Anuluj</button><button class="btn pri" id="aY">OK</button></div>`, 'sm'); $('#aN').onclick = () => { closeModal(); res(false); }; $('#aY').onclick = () => { closeModal(); res(true); }; }); }
-
-function dlgNormy() {
-  const P0 = S.normy, o = N.ocen(S);
-  const gen = +P0.generacja === 2 ? 2 : 1;
-  const draw = (g) => {
-    const req = N.wymagane(S, g), cat = g === 2 ? N.DOC2 : N.DOC1, z = P0.zestawy[g];
-    let h = `<h3>Profil normowy projektu</h3><p>${esc(o.decyzja)}</p>`;
-    if (o.bledy.length) h += o.bledy.map(e => `<div class="msg err">${esc(e)}</div>`).join('');
-    h += `<div class="bar"><span class="seg"><button data-g="1" class="${g === 1 ? 'on' : ''}">Zestaw 1. generacji</button><button data-g="2" class="${g === 2 ? 'on' : ''}">Zestaw 2. generacji</button></span><span class="hint">Pogrubione – dokumenty wymagane dla zakresu tego projektu.</span></div>`;
-    h += '<div class="normtab"><table class="grid"><tr><th>Dokument (wydanie)</th><th>Zmiany (A)</th><th>Poprawki (AC/Ap)</th><th>Załącznik krajowy</th><th>Status PN / ZK</th><th>Zweryf.</th></tr>';
-    cat.forEach(d => {
-      const q = `normy.zestawy.${g}.${d.k}`, e = z[d.k] || {};
-      const rq = req.includes(d.k);
-      h += `<tr style="${rq ? '' : 'opacity:.55'}"><td>${rq ? '<b>' : ''}<input class="txt" data-p="${q}.oznaczenie" data-t="str" value="${esc(e.oznaczenie || '')}">${rq ? '</b>' : ''}<div class="hint">${esc(d.tytul)}${d.zakres ? ' – ' + esc(d.zakres) : ''}${d.pewnosc === 'sprawdz' ? ' <b>[sprawdź oznaczenie]</b>' : ''}</div></td>`;
-      h += `<td><input class="txt" data-p="${q}.zmiany" data-t="list" value="${esc((e.zmiany || []).join('; '))}"></td><td><input class="txt" data-p="${q}.poprawki" data-t="list" value="${esc((e.poprawki || []).join('; '))}"></td><td><input class="txt" data-p="${q}.zk" data-t="str" value="${esc(e.zk || '')}"></td>`;
-      h += `<td><select data-p="${q}.pn" data-t="str">${opt([['PN – wydanie polskie', 'PN – wyd. polskie'], ['PN – wydanie angielskie (uznanie)', 'PN – uznanie (ang.)'], ['nieustalony', 'nieustalony'], ['nieopublikowana', 'nieopublikowana']], e.pn)}</select><select data-p="${q}.zkStatus" data-t="str">${opt([['opublikowany', 'ZK opublikowany'], ['brak', 'brak ZK'], ['nie dotyczy', 'ZK nie dotyczy']], e.zkStatus)}</select></td>`;
-      h += `<td style="text-align:center"><input type="checkbox" data-p="${q}.zweryfikowano" data-t="bool"${e.zweryfikowano ? ' checked' : ''}></td></tr>`;
-    });
-    h += '</table></div>';
-    h += `<div class="bar" style="margin-top:8px"><button class="btn sm" id="nAll">Oznacz wymagane jako zweryfikowane</button><button class="btn sm" id="nDef">Przywróć oznaczenia programu</button></div>`;
-    if (g === 1) {
-      h += '<h4>Parametry ustalane krajowo (NDP) – 1. generacja, ZK PL</h4><div class="normtab"><table class="grid"><tr><th>Parametr</th><th>Wartość</th><th>Punkt normy</th><th>Źródło</th></tr>';
-      Object.keys(N.NDP1_PL).forEach(k => {
-        const d = N.NDP1_PL[k], v = P0.ndp1[k] !== undefined ? P0.ndp1[k] : d.v;
-        const ch = String(v) !== String(d.v);
-        h += `<tr><td>${esc(d.d)}</td><td style="width:120px"><input class="txt${typeof d.v === 'number' ? ' num' : ''}" data-p="normy.ndp1.${k}" data-t="${typeof d.v === 'number' ? 'num' : 'str'}" value="${esc(typeof v === 'number' ? numStr(v) : v)}"${ch ? ' style="border-color:var(--warn)"' : ''}></td><td class="hint">${esc(d.ref)}</td><td class="hint">${esc(d.z)}${d.sp ? ' – <b>zweryfikuj w ZK</b>' : ''}${ch ? ` · <b>zmieniono (program: ${esc(String(d.v))})</b>` : ''}</td></tr>`;
-      });
-      h += '</table></div>';
-    } else {
-      h += '<div class="msg wrn">NDP 2. generacji należy wprowadzić z polskich załączników krajowych do 2. generacji (gdy zostaną opublikowane). Program nie przenosi wartości z ZK do 1. generacji. Silnik tej wersji realizuje obliczenia wyłącznie wg 1. generacji – przy wyborze 2. generacji następuje udokumentowane zastosowanie zestawu 1. generacji w całości.</div>';
-    }
-    h += `<h4>Stan wiedzy programu (${esc(N.STAN_WIEDZY.data)})</h4><ul>${N.STAN_WIEDZY.tekst.map(t => `<li>${esc(t)}</li>`).join('')}</ul><p class="hint">Źródła: ${N.STAN_WIEDZY.zrodla.map(esc).join('; ')}</p>`;
-    h += '<div class="dbtn"><button class="btn pri" id="nOk">Zamknij</button></div>';
-    modal(h, 'lg');
-    $$('#modal [data-g]').forEach(b => { b.onclick = () => draw(+b.dataset.g); });
-    $('#nOk').onclick = () => { closeModal(); renderInputs(); schedule(10); };
-    $('#nAll').onclick = () => { req.forEach(k => { if (z[k]) z[k].zweryfikowano = true; }); if (!P0.dataWeryfikacji) P0.dataWeryfikacji = new Date().toISOString().slice(0, 10); markDirty(); draw(g); };
-    $('#nDef').onclick = () => { const d0 = N.defaultProfile(); P0.zestawy[g] = d0.zestawy[g]; if (g === 1) P0.ndp1 = d0.ndp1; markDirty(); draw(g); };
-  };
-  draw(gen);
+/* ================================================================ OBLICZENIA */
+let tmr = null, popRedraw = null;
+A.setPopRedraw = (f) => { popRedraw = f; };
+function changed(rerender) {
+  dirty = true; updateTitle();
+  if (rerender) renderInputs();
+  clearTimeout(tmr); tmr = setTimeout(recalc, 80);
+  autosave();
+}
+A.changed = changed;
+function recalc() {
+  try { R = J.run(S); } catch (e) { console.error(e); R = { errors: ['Błąd obliczeń: ' + e.message], warnings: [], checks: [], info: [] }; }
+  rendered = {};
+  renderStatus(); renderDsum(); refreshHints(); renderDataSide(); renderActive();
+  if (popRedraw && Q.isModal()) { try { popRedraw(); } catch (e) { console.error(e); } }
+}
+A.recalc = recalc;
+A.recalcNow = () => { clearTimeout(tmr); recalc(); };
+function refreshHints() {
+  // odświeżenie podpowiedzi zależnych od wyników bez przebudowy pól (fokus zostaje)
+  const el = $('#inputs'); if (!el) return;
+  GROUPS.forEach(g => {
+    const d = $(`details[data-g="${g.id}"] .fields`, el); if (!d || d.contains(document.activeElement)) return;
+    if (!g.items.some(f => f.t === 'hint' || f.t === 'html')) return;
+    const open = d.parentElement.open; d.innerHTML = fieldsHTML(g.items, g.id); bindFields(d); d.parentElement.open = open;
+  });
+}
+function renderStatus() {
+  const el = $('#status');
+  if (!R || (R.errors && R.errors.length)) { el.className = 'fail'; el.textContent = '✖ Błąd danych'; return; }
+  const fails = R.checks.filter(c => c.status === 'fail').length, warns = R.checks.filter(c => c.status === 'warn').length;
+  if (fails) { el.className = 'fail'; el.textContent = `✖ Niespełnione warunki: ${fails}`; }
+  else if (warns) { el.className = 'warn'; el.textContent = `✔ Nośność OK · uwagi: ${warns} · η = ${fmt(R.uMax * 100, 0)}%`; }
+  else { el.className = 'ok'; el.textContent = `✔ Wszystkie warunki spełnione · η = ${fmt(R.uMax * 100, 0)}%`; }
 }
 
-function dlgDobor() {
-  const ser = new Set(['IPE', 'HEA']);
-  modal(`<h3>Dobór kształtownika walcowanego</h3><p>Program sprawdza kolejne kształtowniki (od najlżejszego) z wybranych serii pełnym tokiem obliczeń (SGN, stateczność, SGU, podpory, połączenia) i przyjmuje najlżejszy spełniający wszystkie warunki.</p>
-    <div class="lrow">${J.SERIE_DOBOR.map(s => `<label class="chk"><input type="checkbox" data-s="${s}"${ser.has(s) ? ' checked' : ''}> ${s}</label>`).join(' ')}</div>
-    <div class="row"><label>Wytężenie dopuszczalne</label><input class="txt num" id="dLim" value="100"><span class="unit">%</span></div>
-    <div id="dProg" class="hint"></div><div class="dbtn"><button class="btn" id="dX">Anuluj</button><button class="btn pri" id="dGo">Dobierz</button></div>`);
-  let stop = false;
-  $('#dX').onclick = () => { stop = true; closeModal(); };
-  $('#dGo').onclick = async () => {
-    const list = J.candidates($$('#modal [data-s]').filter(c => c.checked).map(c => c.dataset.s));
-    const lim = U.num($('#dLim').value, 100) / 100;
-    $('#dGo').disabled = true;
-    for (let k = 0; k < list.length && !stop; k++) {
-      const c = list[k];
-      $('#dProg').textContent = `Sprawdzam ${c.seria} ${c.nr} (${U.fmt(c.masa, 1)} kg/m)… ${k + 1}/${list.length}`;
-      await new Promise(r => setTimeout(r, 0));
-      const st = U.clone(S); st.przekroj = { typ: 'walc', seria: c.seria, nr: c.nr };
+/* ---------------------------------------------------------- chipy sprawdzeń (nad danymi i wynikami) */
+const DSUM = [
+  ['SGN', 'zginanie', c => /^SGN – nośność/.test(c.grp) && /-M$|-N$/.test(c.id)],
+  ['SGN', 'ścinanie', c => (/^SGN – nośność/.test(c.grp) && /-Vy?$/.test(c.id)) || /-Vb$|-MV$/.test(c.id)],
+  ['', 'zwichrzenie', c => /^SGN – stateczność/.test(c.grp)],
+  ['', 'środnik', c => /^PN-EN 1993-1-5/.test(c.grp) && !/-Vb$|-MV$/.test(c.id)],
+  ['SGU', 'ugięcie', c => /^SGU – ugięcia/.test(c.grp)],
+  ['SGU', 'drgania', c => /^SGU – drgania/.test(c.grp)],
+  ['', 'podpory i węzły', c => /^Podpory/.test(c.grp)],
+  ['', 'pożar', c => /^Pożar/.test(c.grp)],
+  ['', 'zmęczenie', c => /^Zmęczenie/.test(c.grp)],
+  ['', 'kruche pękanie', c => /^Kruche/.test(c.grp)]
+];
+function dsumHTML() {
+  if (!R || !R.checks) return '';
+  if (R.errors && R.errors.length) return `<div class="dsum"><button class="dsb fail" data-dgerr="1">✖ błąd danych – ${esc(R.errors[0]).slice(0, 90)}</button></div>`;
+  let h = '<div class="dsum">';
+  DSUM.forEach(([a, l, pr], gi) => {
+    const cs = R.checks.filter(pr).filter(x => !x.info); if (!cs.length) return;
+    const st = cs.some(x => x.status === 'fail') ? 'fail' : cs.some(x => x.status === 'warn') ? 'warn' : 'ok';
+    const rv = x => (x.util !== null && isFinite(x.util) ? x.util : (x.status === 'fail' ? 9.99 : 0)), w = cs.reduce((p, q) => (rv(q) > rv(p) ? q : p));
+    const bad = cs.filter(x => x.status === 'fail').length;
+    h += `<button class="dsb ${st}" data-dg="${gi}" title="${esc(w.n)}${w.util !== null && isFinite(w.util) ? ' – ' + fmt(w.util * 100, 0) + '%' : ''} · kliknij, aby przejść do Podsumowania"><span class="ic">${st === 'fail' ? '✖' : st === 'warn' ? '!' : '✔'}</span>${a ? `<b>${a}</b> ` : ''}${l}<span class="pc">${w.util !== null && isFinite(w.util) ? fmt(w.util * 100, 0) + '%' : (w.status === 'fail' ? '∞' : '')}</span>${bad ? `<span class="nb">${bad}</span>` : ''}</button>`;
+  });
+  return h + '</div>';
+}
+function bindDsum(el) {
+  $$('[data-dgerr]', el).forEach(b => b.addEventListener('click', () => A.selectTab('sum')));
+  $$('[data-dg]', el).forEach(b => b.addEventListener('click', () => {
+    const pr = DSUM[+b.dataset.dg][2], c = R.checks;
+    const x = c.find(q => pr(q) && q.status === 'fail') || c.find(q => pr(q) && q.status === 'warn');
+    if (x) { A.gotoCheck(x); return; }
+    const i = c.findIndex(pr);
+    A.selectTab('sum'); setTimeout(() => { const tr = $(`#p-sum tr[data-ci="${i}"]`); if (tr) { tr.scrollIntoView({ block: 'center' }); Q.flash(tr); } }, 60);
+  }));
+}
+function renderDsum() {
+  const el = $('#dsum'); if (el) { el.innerHTML = dsumHTML(); bindDsum(el); }
+  $$('.dsumx').forEach(x => { x.innerHTML = dsumHTML(); bindDsum(x); });
+}
+A.dsumHTML = dsumHTML; A.bindDsum = bindDsum;
+
+/* ---------------------------------------------------------- dobór (pasek nad danymi) */
+function renderAutoBar() {
+  const el = $('#autobar'); if (!el) return;
+  const eta = (S.design && S.design.eta) || 100;
+  el.innerHTML = `<div class="autobar"><button class="btn sm" id="adSec" type="button" title="Najlżejszy kształtownik tego samego rodzaju i serii (dla blachownicy – grubości pasów i środnika przy zadanej wysokości i szerokości), dla którego spełnione są wszystkie warunki elementu: nośność przekroju, środnik, zwichrzenie, SGU – z wytężeniem ≤ η">⚙ Dobierz przekrój</button>
+    <button class="btn sm" id="adJnt" type="button" title="Połączenia i oparcia dla obecnych reakcji: śruby, grubość i wysokość blach, spoiny, płyty podporowe, żebra podporowe – wszystkie warunki z wytężeniem ≤ η">⚙ Dobierz połączenia</button>
+    <button class="btn sm pri" id="adAll" type="button" title="Przekrój, a następnie połączenia i oparcia – wszystkie sprawdzenia z Podsumowania spełnione z wytężeniem ≤ η">⚙ Dobierz wszystko</button>
+    <label class="adeta" title="Wymagane wytężenie: E_d / R_d ≤ η w doborze">wytężenie ≤ <input class="txt sm" id="adEta" value="${eta}" inputmode="numeric" autocomplete="off" spellcheck="false"> %</label></div>`;
+  const inp = $('#adEta', el);
+  inp.addEventListener('change', () => { const v = parseNum(inp.value); const ok = v !== null && v >= 50 && v <= 100; inp.classList.toggle('bad', !ok); if (ok) { S.design = Object.assign({}, S.design, { eta: Math.round(v) }); dirty = true; autosave(); } });
+  $('#adSec', el).onclick = () => A.runDesign('sec');
+  $('#adJnt', el).onclick = () => A.runDesign('jnt');
+  $('#adAll', el).onclick = () => A.runDesign('all');
+}
+A.runDesign = async function (kind) {
+  const eta = ((S.design && S.design.eta) || 100) / 100;
+  if (!R || R.errors.length) { Q.toast('Najpierw usuń błędy danych.'); return; }
+  const m = Q.modal(`<h3>${kind === 'jnt' ? 'Dobór połączeń i oparć' : kind === 'all' ? 'Dobór wszystkiego' : 'Dobór przekroju'}</h3><p><i class="dpend"></i> <span id="dProg">Trwa dobór – każdy wariant sprawdzany jest pełnym tokiem obliczeń${eta < 1 ? ` (wytężenie ≤ ${Math.round(eta * 100)}%)` : ''}…</span></p>`);
+  await new Promise(r => setTimeout(r, 30));
+  const log = [];
+  let ok = true;
+  if (kind !== 'jnt') {
+    const list = J.doborKandydaci(S);
+    let found = null;
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i]; const pe = $('#dProg', m); if (pe) pe.textContent = `Sprawdzam ${c.nazwa} (${fmt(c.masa, 1)} kg/m) – ${i + 1}/${list.length}…`;
+      if (i % 2 === 0) await new Promise(r => setTimeout(r, 0));
+      const st = U.clone(S); st.przekroj = Object.assign({}, S.przekroj, c.d);
       let r; try { r = J.run(st, { fast: true }); } catch (e) { continue; }
-      if (J.passes(r, lim)) {
-        $('#dProg').innerHTML = `<b>Dobrano: ${c.seria} ${c.nr}</b> (${U.fmt(c.masa, 1)} kg/m), wytężenie max ${U.pct(r.uMax)} – decyduje: ${esc(r.gov ? r.gov.n : '')}.`;
-        $('#dGo').disabled = false; $('#dGo').textContent = 'Przyjmij';
-        $('#dGo').onclick = () => { S.przekroj = { typ: 'walc', seria: c.seria, nr: c.nr }; closeModal(); markDirty(); renderInputs(); schedule(10); toast(`Przyjęto ${c.seria} ${c.nr}`); };
-        return;
-      }
+      if (J.passesFor(r, eta, J.memberFilter)) { found = { c, r }; break; }
     }
-    if (!stop) { $('#dProg').textContent = 'Żaden kształtownik z wybranych serii nie spełnia warunków – rozważ zmianę schematu, stężeń, gatunku stali lub dwuteownik spawany.'; $('#dGo').disabled = false; }
-  };
+    if (found) { S.przekroj = Object.assign({}, S.przekroj, found.c.d); log.push(`Przekrój: ${found.c.nazwa} (${fmt(found.c.masa, 1)} kg/m) – największe wytężenie elementu ${fmt(Math.max(...found.r.checks.filter(J.memberFilter).filter(c => !c.info && c.util !== null).map(c => c.util)) * 100, 0)}%.`); }
+    else { ok = false; log.push('Żaden przekrój tego rodzaju i serii nie spełnia warunków elementu – zmień serię, gatunek stali, schemat lub stężenia.'); }
+  }
+  if (kind !== 'sec' && ok) {
+    const r0 = J.run(S);
+    const d = J.dobierzWezly(S, r0, eta);
+    S = d.st; if (BEAMS) BEAMS[curB] = S; log.push(...d.log); if (!d.ok) ok = false;
+    if (!d.log.length) log.push('Brak połączeń śrubowych i oparć do doboru (podpory „oparcie na stali” bez żeber).');
+  }
+  Q.closeModal();
+  dirty = true; renderInputs(); recalc(); autosave();
+  Q.toast((ok ? 'Dobrano: ' : 'Dobór niepełny: ') + log.join(' '), 9000);
+};
+
+/* ================================================================ PANEL SCHEMATU (Dane) */
+function beamTabsHTML() {
+  const B = BEAMS || [S];
+  return `<div class="beamtabs" role="tablist" aria-label="Belki w projekcie">${B.map((b, i) => `<button class="btab ${i === curB ? 'on' : ''}" data-btab="${i}" type="button" title="${esc(b.meta.nazwa || 'Belka ' + (i + 1))} – kliknij, aby przełączyć; dwuklik – zmiana nazwy">${i + 1}<span>${esc((b.meta.nazwa || '').slice(0, 14))}</span>${i === curB && B.length > 1 ? `<i data-bdel="${i}" title="Usuń belkę z projektu">×</i>` : ''}</button>`).join('')}<button class="btab add" data-badd="1" type="button" title="Dodaj belkę do projektu (do 10)">+</button></div>`;
+}
+function selList() { const md = R && R.md; return md ? Array.from(selSpans).filter(i => md.seg[i]).sort((a, b) => a - b) : []; }
+A.selList = selList;
+function renderDataSide() {
+  const el = $('#dataside'); if (!el) return;
+  if (!R || !R.md) { el.innerHTML = `<div class="box">${beamTabsHTML()}${(R && R.errors || []).map(e => `<div class="msg err">${esc(e)}</div>`).join('') || '<p class="hint">Brak modelu.</p>'}</div>`; bindSide(el); return; }
+  const md = R.md, s = A.stage();
+  const LEGW = (el.clientWidth || 600) < 560 ? 0 : 132;
+  const W2 = Math.max(320, Math.min(860, ((el.clientWidth || 640) - 30 - LEGW) * 0.98));
+  const leg = [], out = {};
+  const svg = D.scheme(S, R, { W: W2, etap: s, edit: true, sel: selSpans, diag: diagMode === 'off' ? null : diagMode, legend: leg, dims: showDims, out });
+  const sel = selList().map(i => md.seg[i].n);
+  const tools = `<span class="schtools">${[['loads', 'Obciążenia', 'Okno obciążeń: zaznaczonych przęseł albo całej belki'], ['sec', 'Przekrój', 'Przekrój i materiał belki'], ['brace', 'Stężenia', 'Stężenia boczne i skrętne, stężenie ciągłe'], ['stages', 'Etapy', 'Etapy realizacji i podpory montażowe'], ['dims', 'Wymiary', 'Pokaż / ukryj wymiary']].map(([k, l, t]) => `<button class="btn sm${k === 'dims' && showDims ? ' on' : ''}" data-tool="${k}" type="button" title="${t}">${l}</button>`).join('')}</span>`;
+  const seen = new Set(), legH = leg.filter(q => { const k = String(q.li); if (seen.has(k)) return false; seen.add(k); return true; }).map(q => `<label class="ldl${q.off ? ' off' : ''}" style="top:${(q.y / (out.H || 1) * 100).toFixed(2)}%" title="${q.sw ? 'Ciężar własny belki' : q.off ? 'Obciążenie pominięte – zaznacz, aby uwzględnić' : 'Odznacz, aby pominąć obciążenie w obliczeniach'}"><input type="checkbox" data-ldon="${q.li}" ${q.off ? '' : 'checked'}><i style="background:${q.col}"></i><span>${esc(q.lab)}</span></label>`).join('');
+  const dgSw = `<span class="segsw sm dgsw">${[['M', 'M'], ['V', 'V'], ['w', 'ugięcie'], ['N', 'N'], ['R', 'R'], ['off', 'bez wykresu']].map(([k, l]) => `<button type="button" data-dgm="${k}" class="${diagMode === k ? 'on' : ''}">${l}</button>`).join('')}</span>`;
+  const stSw = md.nE > 1 ? `<span class="segsw sm">${md.etapy.map((e, i) => `<button type="button" data-stg="${i}" class="${i === s ? 'on' : ''}" title="${esc(e.nazwa)}">Etap ${i + 1}</button>`).join('')}</span>` : '';
+  let h = `<div class="box"><div class="schsticky">${beamTabsHTML()}<h4 class="schhd">Schemat statyczny i obciążenia${tools}</h4>
+    <div class="schsel">${sel.length ? `Zaznaczone: <b>${esc(sel.join(', '))}</b> · <button class="lnk" id="selClr" type="button">odznacz (Esc)</button>` : '<span class="mut">Lewy przycisk – zaznacz przęsło, prawy – menu (obciążenia, przekrój, stężenia, podpora…). Dwuklik na belce – węzeł w tym miejscu.</span>'}${stSw ? ` · ${stSw} <span class="mut">${esc(md.etapy[s].nazwa)}</span>` : ''}</div>
+    <div class="schrow">${LEGW ? `<div class="ldleg" style="width:${LEGW}px">${legH}</div>` : ''}<div class="schemewrap"><div class="zoomtgt">${svg}${out.dgY ? `<div class="dgbar" style="top:${((out.dgY - 6) / out.H * 100).toFixed(2)}%">${dgSw}</div>` : ''}</div></div></div>${LEGW ? '' : `<div class="ldlegm">${legH}</div>`}${out.dgY ? '' : `<div style="text-align:center;margin:4px 0">${dgSw}</div>`}</div>`;
+  h += `<div class="optchk">
+    <label class="chk sm"><input type="checkbox" data-ck="ciezarWlasny.auto" ${S.ciezarWlasny.auto !== false ? 'checked' : ''}><span>Uwzględnij ciężar własny belki (78,5 kN/m³)${S.ciezarWlasny.auto !== false ? ` + dodatek na połączenia <input class="txt sm" style="width:46px;height:22px" data-ckn="ciezarWlasny.dodatek" value="${esc(showNum(S.ciezarWlasny.dodatek))}"> %` : ''}</span></label>
+    <label class="chk sm"><input type="checkbox" data-ck="stezenieCiagle.pasG" ${S.stezenieCiagle.pasG ? 'checked' : ''}><span>Pas górny stężony ciągle (płyta, blacha fałdowa)<small class="ophint">Zwichrzenie pasa górnego zablokowane od wskazanego etapu; przy momentach ujemnych ściskany pas dolny pozostaje niestężony.</small></span></label>
+    <label class="chk sm"><input type="checkbox" data-ck="sgu.drgania" ${S.sgu.drgania !== false ? 'checked' : ''}><span>Sprawdzaj częstotliwość drgań własnych (f<sub>1</sub> ≥ f<sub>min</sub> = ${fmt(U.num(S.sgu.fmin, 3), 1)} Hz)</span></label>
+    <div class="firerow"><label class="chk sm"><input type="checkbox" id="fireOn" ${S.pozar.aktywny ? 'checked' : ''}><span>Odporność ogniowa wg PN-EN 1993-1-2</span></label><select id="fireR" ${S.pozar.aktywny ? '' : 'disabled'}>${[15, 30, 45, 60, 90, 120, 180, 240].map(r => `<option value="${r}" ${U.num(S.pozar.R) === r ? 'selected' : ''}>R${r}</option>`).join('')}</select></div>${fireStatusHTML()}
+    <label class="chk sm"><input type="checkbox" data-ck="zmeczenie.aktywny" ${S.zmeczenie.aktywny ? 'checked' : ''}><span>Zmęczenie wg PN-EN 1993-1-9 (parametry w Danych)</span></label>
+  </div>`;
+  h += `<div class="hint">${exDetails('<b>Lewy przycisk</b> na przęśle – zaznaczanie przęseł (kolejne kliknięcia dodają / odejmują, Esc – odznacz); <b>prawy przycisk</b> – menu: obciążenia, przekrój, stężenia, podpory montażowe. Kliknij <b>podporę</b> – rodzaj podparcia, oparcie lub połączenie (wymiary blach, śruby, spoiny); kliknij <b>pasmo obciążenia</b> – aby je zmienić; pole wyboru w legendzie – uwzględnij / pomiń. <b>Dwuklik</b> na belce – siła skupiona, stężenie lub podpora montażowa w tym miejscu. <b>Ctrl + kółko</b> – powiększenie schematu.', 'Jak zadawać obciążenia i podpory?')}</div>`;
+  h += `<h4 class="lsec">Zestawienie obciążeń</h4>${loadSummaryHTML()}`;
+  h += `<h4 class="lsec">Podpory</h4><table class="kv suptab">${md.sup.map((p, i) => `<tr data-sup="${i}" title="Kliknij, aby zmienić"><td><b>${esc(p.id)}</b></td><td>${esc(supRowTxt(i))}</td><td><button class="lnk" data-sup="${i}" type="button">zmień…</button></td></tr>`).join('')}${md.tmp.map((t, i) => `<tr data-tmp="${i}"><td><b>${t.id}</b></td><td>montażowa, x = ${fmt(t.x / 1000, 2)} m, usuwana po etapie ${t.do + 1}</td><td><button class="lnk" data-tmp="${i}" type="button">zmień…</button></td></tr>`).join('')}</table>`;
+  h += combSumHTML();
+  h += '</div>';
+  if (R.errors && R.errors.length) h += `<div class="msgs">${R.errors.map(e => `<div class="msg err">${esc(e)}</div>`).join('')}</div>`;
+  el.innerHTML = h;
+  Q.themeSvgIn(el); Q.zoomApply(el);
+  bindSide(el);
+  requestAnimationFrame(() => { const lg = $('.ldleg', el); if (!lg) return; let last = -1e9; $$('.ldl', lg).sort((a, b) => a.offsetTop - b.offsetTop).forEach(q => { const t = Math.max(q.offsetTop - q.offsetHeight / 2, last + 1); q.style.top = t + 'px'; q.style.transform = 'none'; last = t + q.offsetHeight; }); });
+}
+A.renderDataSide = renderDataSide;
+function supRowTxt(i) {
+  const p = S.podpory[i] || {}, w = p.wezel || {};
+  const t = ({ przegub: p.przesuwna ? 'przegubowa przesuwna' : 'przegubowa', utwierdzenie: 'utwierdzenie', sprezyna: 'sprężysta', podatne: 'przegub + sprężyna obrotowa' })[p.typ] || p.typ;
+  const wz = ({ brak: 'oparcie na stali', oparcie: `płyta podporowa na ${w.podloze === 'mur' ? 'murze' : w.podloze === 'stal' ? 'stali' : 'betonie'}`, blacha_czolowa: 'krótka blacha czołowa', blacha_zebrowa: 'blacha żebrowa' })[w.typ || 'brak'];
+  return `${t}; zwichrzenie: ${p.ltb === 'pelne' ? 'utwierdzenie' : 'widełkowa'}; ${wz}${w.zebro ? ', żebra podporowe' : ''}`;
+}
+A.supRowTxt = supRowTxt;
+function fireStatusHTML() {
+  if (!S.pozar.aktywny) return '';
+  const fr = R && R.pozar;
+  if (!fr || !fr.hist) return `<div class="firest">Pożar: brak wyniku${R && R.errors.length ? ' (błąd danych)' : ''}.</div>`;
+  return `<div class="firest ${fr.ok ? 'ok' : 'fail'}">θ<sub>a,cr</sub> = <b>${fmt(fr.thcr, 0)} °C</b> · czas nagrzania do θ<sub>a,cr</sub>: <b>${fr.tcr === null ? `> ${fmt(fr.hist[fr.hist.length - 1][0], 0)}` : fmt(fr.tcr, 0)} min</b> ${fr.ok ? '≥' : '<'} R${fr.Rreq} ${fr.ok ? '✔' : '✖'} · ${fr.prot ? `zabezpieczenie d<sub>p</sub> = ${esc(String(S.pozar.dp))} mm` : 'bez zabezpieczenia'} · A<sub>m</sub>/V = ${fmt(fr.sf.AmV, 0)} m⁻¹</div>`;
+}
+function loadSummaryHTML() {
+  if (!R || !R.md) return '';
+  const rows = [];
+  if (S.ciezarWlasny.auto !== false && R.sec) rows.push(`<tr><td><input type="checkbox" checked disabled class="ldon"> G₀</td><td>ciężar własny belki</td><td>stałe</td><td class="n">${fmt(R.sec.gk * (1 + U.num(S.ciezarWlasny.dodatek) / 100), 2)} kN/m</td><td></td></tr>`);
+  S.obciazenia.forEach((o, i) => {
+    const comp = (o.sklad || []).map(k => k.typ === 'q' ? `${fmt(U.num(k.q0), 2)}${k.q1 !== '' && k.q1 !== undefined && U.num(k.q1) !== U.num(k.q0) ? '…' + fmt(U.num(k.q1), 2) : ''} kN/m` : k.typ === 'P' ? `${fmt(U.num(k.P), 1)} kN @ ${fmt(U.num(k.x), 2)} m` : `${fmt(U.num(k.M), 1)} kNm`).join('; ');
+    const psi = BS.S.RODZAJE[o.rodzaj].stale || o.rodzaj === 'A' ? '' : 'ψ ' + BS.K.psi(o).map(v => fmt(v, 1)).join('/');
+    rows.push(`<tr class="${o.aktywne === false ? 'ldoff' : ''}" data-li="${i}" style="cursor:pointer" title="Kliknij, aby zmienić"><td><input type="checkbox" class="ldon" data-ldon="${i}" ${o.aktywne === false ? '' : 'checked'}> <b>${esc(o.id)}</b></td><td>${esc(o.nazwa)}</td><td>${esc(BS.S.RODZAJE[o.rodzaj].n)}${R.md.nE > 1 ? ` · etap ${U.num(o.etap) + 1}` : ''}</td><td class="n">${esc(comp)}</td><td class="hint" style="margin:0">${psi}</td></tr>`);
+  });
+  return `<table class="kv ldsum" style="width:100%">${rows.join('')}</table><div style="margin-top:4px"><button class="addb" data-tool="loads" type="button">Obciążenia…</button> <button class="addb" data-act="snow" type="button">+ śnieg (strefy PL)…</button></div>`;
+}
+function combSumHTML() {
+  if (!R || !R.combos) return '';
+  const n = (t) => R.combos.filter(c => c.typ === t).length;
+  return `<div class="combsum">Kombinacje: SGN ${n('SGN')} (${S.normy.ndp1.komb === '6.10' ? 'wzór 6.10' : 'wzory 6.10a/6.10b'}), charakterystyczne ${n('char')}, częste ${n('czest')}, quasi-stałe ${n('qp')}${n('wyj') ? `, wyjątkowe ${n('wyj')}` : ''}${n('poz') ? `, pożarowe ${n('poz')}` : ''}; <small>obciążenia zmienne w każdej kombinacji wiodące i towarzyszące, układy niekorzystne w przęsłach (szachownica) – dla obciążeń oznaczonych „niekorzystnie w przęsłach”.</small></div>`;
+}
+function bindSide(el) {
+  $$('.supp', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.supportPopup(+g.dataset.sup); }));
+  $$('tr[data-sup], button[data-sup]', el).forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); A.supportPopup(+b.dataset.sup); }));
+  $$('.tsupp, tr[data-tmp], button[data-tmp]', el).forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); A.stagesPopup(); }));
+  $$('.rst', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.bracePopup(g.dataset.rst === 'g' ? null : +g.dataset.rst); }));
+  $$('[data-cont]', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); A.bracePopup(); }));
+  $$('.elm', el).forEach(g => g.addEventListener('click', ev => { const k = +g.dataset.seg; if (selSpans.has(k)) selSpans.delete(k); else selSpans.add(k); renderDataSide(); }));
+  $$('.ld', el).forEach(g => g.addEventListener('click', ev => { ev.stopPropagation(); const li = g.dataset.li; if (li === 'sw') { const f = $('[data-ck="ciezarWlasny.auto"]', el); if (f) Q.flash(f.closest('label')); return; } A.loadPopup({ focus: +li }); }));
+  const sw = $('.schemewrap', el);
+  if (sw) {
+    sw.addEventListener('contextmenu', ev => {
+      ev.preventDefault();
+      const t = ev.target.closest ? ev.target : null; if (!t) return;
+      const sp = t.closest('.supp'), ld = t.closest('.ld'), rs = t.closest('.rst'), tp = t.closest('.tsupp');
+      if (sp) return supMenu(ev.clientX, ev.clientY, +sp.dataset.sup);
+      if (ld && ld.dataset.li !== 'sw') return loadMenu(ev.clientX, ev.clientY, +ld.dataset.li);
+      if (rs) return braceMenu(ev.clientX, ev.clientY, rs.dataset.rst);
+      if (tp) return Q.ctxMenu(ev.clientX, ev.clientY, [['st', 'Etapy i podpory montażowe…'], ['del', 'Usuń podporę montażową']], a => { if (a === 'st') A.stagesPopup(); else { S.podporyTymczasowe.splice(+tp.dataset.tmp, 1); changed(true); } });
+      const g = t.closest('.elm'); if (g && !selSpans.has(+g.dataset.seg)) { selSpans.add(+g.dataset.seg); renderDataSide(); }
+      schemeMenu(ev.clientX, ev.clientY);
+    });
+    sw.addEventListener('dblclick', ev => { const svg = $('svg.schemesvg', sw); if (!svg || !R || !R.md) return; const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal; const px = (ev.clientX - r.left) * vb.width / r.width; const ml = 34, mr = 34; const x = (px - ml) / (vb.width - ml - mr) * R.md.L; if (x < 0 || x > R.md.L) return; A.nodePopup(Math.round(x / 50) * 50); });
+  }
+  $$('[data-tool]', el).forEach(b => b.addEventListener('click', () => schemeAct(b.dataset.tool)));
+  $$('input[data-ldon]', el).forEach(cb => { cb.addEventListener('click', ev => ev.stopPropagation()); cb.addEventListener('change', () => { const li = cb.dataset.ldon; if (li === 'sw') { S.ciezarWlasny.auto = cb.checked; } else { const o = S.obciazenia[+li]; if (o) o.aktywne = cb.checked; } changed(false); }); });
+  $$('tr[data-li]', el).forEach(tr => tr.addEventListener('click', ev => { if (ev.target.closest('input')) return; A.loadPopup({ focus: +tr.dataset.li }); }));
+  $$('[data-ck]', el).forEach(cb => cb.addEventListener('change', () => { setP(S, cb.dataset.ck, cb.checked); changed(true); }));
+  $$('[data-ckn]', el).forEach(inp => inp.addEventListener('change', () => { const v = parseNum(inp.value); if (v === null || v < 0) { inp.classList.add('bad'); return; } setP(S, inp.dataset.ckn, v); changed(false); }));
+  $$('[data-dgm]', el).forEach(b => b.addEventListener('click', () => { diagMode = b.dataset.dgm; try { localStorage.setItem('bs.diag', diagMode); } catch (e) { /* */ } renderDataSide(); }));
+  $$('[data-stg]', el).forEach(b => b.addEventListener('click', () => A.setStage(+b.dataset.stg)));
+  const fo = $('#fireOn', el), fr = $('#fireR', el);
+  if (fo) fo.onchange = () => { S.pozar.aktywny = fo.checked; S.pozar.R = +fr.value; changed(true); };
+  if (fr) fr.onchange = () => { S.pozar.R = +fr.value; changed(false); };
+  const sc = $('#selClr', el); if (sc) sc.onclick = () => { selSpans.clear(); renderDataSide(); };
+  $$('[data-act]', el).forEach(b => b.addEventListener('click', () => doAct(b.dataset.act)));
+}
+function schemeAct(a) {
+  const sel = selList();
+  if (a === 'loads') A.loadPopup(sel.length ? { segs: sel } : { all: true });
+  else if (a === 'sec') A.secPopup();
+  else if (a === 'brace') A.bracePopup();
+  else if (a === 'stages') A.stagesPopup();
+  else if (a === 'dims') { showDims = !showDims; try { localStorage.setItem('bs.dims', showDims ? '1' : '0'); } catch (e) { /* */ } renderDataSide(); }
+  else if (a === 'all') { R.md.seg.forEach((sg, i) => selSpans.add(i)); renderDataSide(); }
+  else if (a === 'none') { selSpans.clear(); renderDataSide(); }
+  else if (a === 'schemes') A.schemesPopup();
+}
+A.schemeAct = schemeAct;
+function supMenu(x, y, i) {
+  const p = S.podpory[i]; if (!p) return;
+  const id = R.md.sup[i] ? R.md.sup[i].id : i + 1, ck = (c) => (c ? '✓ ' : '');
+  Q.ctxMenu(x, y, [['pop', `Podpora ${esc(id)} – oparcie / połączenie…`], ['-'], ['przegub', ck(p.typ === 'przegub') + 'Przegubowa'], ['utwierdzenie', ck(p.typ === 'utwierdzenie') + 'Utwierdzenie'], ['sprezyna', ck(p.typ === 'sprezyna') + 'Sprężysta…'], ['przes', ck(!!p.przesuwna) + 'Przesuwna (łożysko przesuwne)', p.typ !== 'przegub'], ['-'], ['wid', ck(p.ltb !== 'pelne') + 'Zwichrzenie: podparcie widełkowe'], ['pel', ck(p.ltb === 'pelne') + 'Zwichrzenie: pełne utwierdzenie'], ['-'], ['jb', 'Krótka blacha czołowa…'], ['jf', 'Blacha żebrowa…'], ['jo', 'Płyta podporowa (beton / mur)…'], ['js', 'Oparcie na stali (+ żebra)…']], a => {
+    if (a === 'pop') return A.supportPopup(i);
+    if (['przegub', 'utwierdzenie', 'sprezyna'].includes(a)) { p.typ = a; if (a === 'utwierdzenie') p.ltb = 'pelne'; if (a !== 'przegub') p.przesuwna = false; S.schemat = schemeOf(); changed(true); if (a === 'sprezyna') A.supportPopup(i); return; }
+    if (a === 'przes') { p.przesuwna = !p.przesuwna; changed(true); return; }
+    if (a === 'wid' || a === 'pel') { p.ltb = a === 'pel' ? 'pelne' : 'widelkowe'; changed(true); return; }
+    const t = { jb: 'blacha_czolowa', jf: 'blacha_zebrowa', jo: 'oparcie', js: 'brak' }[a];
+    if (t) { if ((p.wezel || {}).typ !== t) p.wezel = Object.assign({ typ: t }, A.JDEF(t, R.sec && R.sec.h)); A.recalcNow(); A.supportPopup(i, t === 'brak' ? 'stiff' : 'plate'); }
+  });
+}
+function loadMenu(x, y, li) {
+  const o = S.obciazenia[li]; if (!o) return;
+  Q.ctxMenu(x, y, [['ed', `${esc(o.id)} – zmień…`], ['on', o.aktywne === false ? 'Uwzględnij w obliczeniach' : 'Pomiń w obliczeniach'], ['dup', 'Powiel'], ['-'], ['del', 'Usuń obciążenie']], async a => {
+    if (a === 'ed') return A.loadPopup({ focus: li });
+    if (a === 'on') { o.aktywne = o.aktywne === false; changed(false); return; }
+    if (a === 'dup') { const c = U.clone(o); let n = 1; while (S.obciazenia.some(q => q.id === o.rodzaj + n)) n++; c.id = o.rodzaj + n; c.nazwa = (o.nazwa || '') + ' (kopia)'; S.obciazenia.push(c); changed(true); return; }
+    if (a === 'del' && await Q.ask(`Usunąć obciążenie „${esc(o.id)} – ${esc(o.nazwa || '')}”?`, 'Usuń', true)) { S.obciazenia.splice(li, 1); changed(true); }
+  });
+}
+function braceMenu(x, y, src) {
+  if (src === 'g') { Q.ctxMenu(x, y, [['pop', 'Stężenia (rozstaw l_t)…'], ['off', 'Usuń stężenia rozmieszczone równomiernie']], a => { if (a === 'pop') A.bracePopup(); else { S.analiza.ltRozstaw = ''; changed(true); } }); return; }
+  const i = +src, z = S.stezenia[i]; if (!z) return;
+  Q.ctxMenu(x, y, [['pop', 'Stężenie – zmień…'], ['boczne', (z.typ === 'boczne' ? '✓ ' : '') + 'boczne'], ['skretne', (z.typ === 'skretne' ? '✓ ' : '') + 'skrętne'], ['pelne', (z.typ === 'pelne' ? '✓ ' : '') + 'pełne'], ['-'], ['del', 'Usuń stężenie']], a => {
+    if (a === 'pop') return A.bracePopup(i);
+    if (a === 'del') { S.stezenia.splice(i, 1); changed(true); return; }
+    z.typ = a; changed(true);
+  });
+}
+function schemeMenu(x, y) {
+  const n = selSpans.size, md = R.md;
+  const it = [['loads', n ? `Obciążenia – ${n === 1 ? md.seg[selList()[0]].n : `zaznaczone (${n})`}…` : 'Obciążenia – cała belka…'], ['sec', 'Przekrój…'], ['brace', 'Stężenia boczne…'], ['stages', 'Etapy realizacji i podpory montażowe…'], ['schemes', 'Schematy typowe…'], ['dims', `${showDims ? '✓ ' : ''}Wymiary`], ['-'], ['all', 'Zaznacz wszystkie przęsła'], ['none', 'Odznacz wszystko (Esc)', !n]];
+  Q.ctxMenu(x, y, it.map(([k, l, d]) => [k, esc(l || ''), d]), schemeAct);
 }
 
-function dlgSnow() {
-  modal(`<h3>Obciążenie śniegiem – PN-EN 1991-1-3 z ZK PL</h3>
-    <div class="row"><label>Strefa obciążenia śniegiem</label><select id="sZ">${[1, 2, 3, 4, 5].map(z => `<option value="${z}"${z === 2 ? ' selected' : ''}>strefa ${z}</option>`).join('')}</select><span class="unit"></span></div>
-    <div class="row"><label>Wysokość nad poziomem morza A</label><input class="txt num" id="sA" value="200"><span class="unit">m</span></div>
-    <div class="row"><label>Kąt nachylenia dachu α</label><input class="txt num" id="sAl" value="5"><span class="unit">°</span></div>
-    <div class="row"><label>C<sub>e</sub> (0,8 / 1,0 / 1,2)</label><input class="txt num" id="sCe" value="1,0"><span class="unit"></span></div>
-    <div class="row"><label>C<sub>t</sub></label><input class="txt num" id="sCt" value="1,0"><span class="unit"></span></div>
-    <div class="row"><label>Rozstaw belek (szerokość zbierania)</label><input class="txt num" id="sB" value="2,0"><span class="unit">m</span></div>
-    <p id="sOut" class="hint"></p>
-    <p class="hint">Wartości s<sub>k</sub> wg ZK PL: strefa 1: 0,007A − 1,4 ≥ 0,70; 2: 0,9; 3: 0,006A − 0,6 ≥ 1,2; 4: 1,6; 5: 0,93·exp(0,00134A) ≥ 2,0 kN/m². μ<sub>1</sub> dla dachu jedno- i dwuspadowego. Worki śnieżne i inne układy – wprowadź osobno.</p>
-    <div class="dbtn"><button class="btn" id="sX">Anuluj</button><button class="btn pri" id="sGo">Dodaj przypadek S</button></div>`);
-  const calc = () => {
-    const z = +$('#sZ').value, Aa = U.num($('#sA').value), al = U.num($('#sAl').value);
-    const sk = z === 1 ? Math.max(0.7, 0.007 * Aa - 1.4) : z === 2 ? 0.9 : z === 3 ? Math.max(1.2, 0.006 * Aa - 0.6) : z === 4 ? 1.6 : Math.max(2.0, 0.93 * Math.exp(0.00134 * Aa));
-    const mu = al <= 30 ? 0.8 : al < 60 ? 0.8 * (60 - al) / 30 : 0;
-    const s = mu * U.num($('#sCe').value, 1) * U.num($('#sCt').value, 1) * sk, q = s * U.num($('#sB').value, 1);
-    $('#sOut').innerHTML = `s<sub>k</sub> = ${U.fmt(sk, 2)} kN/m², μ<sub>1</sub> = ${U.fmt(mu, 2)} → s = ${U.fmt(s, 3)} kN/m² → <b>q = ${U.fmt(q, 2)} kN/m</b>`;
-    return { sk, mu, s, q, z, Aa };
-  };
-  $$('#modal input, #modal select').forEach(e => { e.oninput = calc; e.onchange = calc; }); calc();
-  $('#sX').onclick = closeModal;
-  $('#sGo').onclick = () => { const r = calc(); S.obciazenia.push({ id: 'S' + (S.obciazenia.filter(o => o.rodzaj === 'S').length + 1), nazwa: `Śnieg – strefa ${r.z}, A = ${r.Aa} m, s = ${U.fmt(r.s, 2)} kN/m²`, rodzaj: 'S', etap: S.etapy.length - 1, uklad: 'szachownica', wyklucz: '', N: 0, sklad: [{ typ: 'q', q0: +r.q.toFixed(3), q1: '', x0: 0, x1: '', kier: 'z', wys: 'pas_g' }] }); closeModal(); markDirty(); renderInputs(); schedule(10); };
+/* ================================================================ ZAKŁADKI */
+function renderActive() {
+  const on = $('.tabs button.on'); if (!on) return;
+  const t = on.dataset.tab;
+  if (t === 'data') return;
+  if (rendered[t]) return;
+  const el = $('#p-' + t); if (!el) return;
+  try { BS.V[t](el); } catch (e) { console.error(e); el.innerHTML = `<div class="msg err">Błąd widoku: ${esc(e.message)}</div>`; }
+  rendered[t] = true;
 }
+A.renderActive = renderActive;
+A.invalidate = (t) => { if (t) rendered[t] = false; else rendered = {}; };
+A.selectTab = (t) => { const b = $(`.tabs button[data-tab="${t}"]`); if (b) b.click(); };
 
-function dlgAbout() {
-  modal(`<h3>${BS.APP} ${BS.VERSION}</h3><p>Analiza i projektowanie belek stalowych według Eurokodów z jawnym profilem normowym (Polska: PN-EN z załącznikami krajowymi). Program prowadzi od założeń do kompletnego, odtwarzalnego raportu: nośność, stateczność, SGU, podpory, połączenia, etapy realizacji, pożar, zmęczenie, kruche pękanie, klasa wykonania.</p>
-  <p><b>Silnik:</b> ${esc(BS.ENGINE)} · format danych: ${esc(BS.FORMAT)}</p>
-  <p><b>Odtwarzalność:</b> raport zawiera sumę kontrolną SHA-256 danych wejściowych (postać kanoniczna JSON), wersję silnika i pełne dane projektu – plik raportu HTML można ponownie otworzyć w programie.</p>
-  <p><b>Zakres i ograniczenia:</b> przekroje dwuteowe walcowane i spawane (bi- i monosymetryczne), pryzmatyczne; analiza sprężysta I rzędu; zwichrzenie – MES z obciążeniami w płaszczyźnie środnika; brak skręcania od mimośrodu obciążeń; węzły przegubowe (bez węzłów momentowych); zmęczenie – obciążenia stacjonarne o stałej amplitudzie; pożar – metody uproszczone (4.2.3–4.2.5).</p>
-  <p class="hint">Skróty: Ctrl+N nowy, Ctrl+O otwórz, Ctrl+S zapisz, Ctrl+P drukuj raport.</p>
-  <div class="dbtn"><button class="btn pri" id="abOk">OK</button></div>`, 'sm');
-  $('#abOk').onclick = closeModal;
-}
-
-/* ================================================================ PLIKI */
-let reqId = 0; const pending = {};
+/* ================================================================ PLIKI, BELKI */
+const pending = {}; let reqId = 0;
 window.__hostReply = (id, res) => { const p = pending[id]; if (p) { delete pending[id]; p(res); } };
 function hostCall(op, args) { return new Promise(res => { const id = ++reqId; pending[id] = res; try { window.hostRequest(JSON.stringify(Object.assign({ id, op }, args))); } catch (e) { delete pending[id]; res({ ok: false, err: String(e) }); } }); }
 const inHost = () => typeof window.hostRequest === 'function';
-function toast(msg, ms) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => { t.style.display = 'none'; }, ms || 2600); }
-A.toast = toast;
+A.hostCall = hostCall; A.inHost = inHost;
 const baseName = (p) => (p || '').split(/[\\/]/).pop();
 const safeName = (ext) => (S.meta.nazwa || 'belka').replace(/[\\/:*?"<>|]+/g, '_').trim() + ext;
-function markDirty() { dirty = true; updateTitle(); autosave(); }
+A.safeName = safeName; A.baseName = baseName;
 function updateTitle() {
   const fn = filePath ? baseName(filePath) : 'bez nazwy';
   $('#fileName').textContent = (dirty ? '● ' : '') + fn;
-  const t = `${BS.APP} – ${S.meta.nazwa || 'belka'} [${fn}${dirty ? ' *' : ''}]`;
+  const t = `BelkaStal – ${S.meta.nazwa || 'belka'} [${fn}${dirty ? ' *' : ''}]`;
   document.title = t;
   if (typeof window.hostTitle === 'function') { try { window.hostTitle(t); } catch (e) { /* */ } }
 }
-function projectJSON() {
-  return JSON.stringify({ format: BS.FORMAT, program: `${BS.APP} ${BS.VERSION}`, silnik: BS.ENGINE, zapisano: new Date().toISOString(), sha256: J.hash(S), dane: S }, null, 1);
+const beamsSync = () => { if (!BEAMS) BEAMS = [S]; BEAMS[curB] = S; };
+const beamsOut = () => { beamsSync(); return BEAMS.length > 1 ? { beams: BEAMS, cur: curB } : {}; };
+function beamsIn(o, st) {
+  if (o && Array.isArray(o.beams) && o.beams.length > 1) { BEAMS = o.beams.slice(0, 10).map(b => J.normalize(b)); curB = U.clamp(+o.cur || 0, 0, BEAMS.length - 1); return BEAMS[curB]; }
+  BEAMS = null; curB = 0; return J.normalize(st);
 }
+function switchBeam(i) { beamsSync(); if (i === curB || !BEAMS[i]) return; curB = i; S = BEAMS[i]; vStage = null; selSpans.clear(); $('#projName').value = S.meta.nazwa || ''; rendered = {}; renderInputs(); recalc(); updateTitle(); autosave(); }
+function addBeam() { beamsSync(); if (BEAMS.length >= 10) { Q.toast('Maksymalnie 10 belek w projekcie.'); return; } const n = J.defaultState(); ['material', 'normy', 'sgu', 'wykonanie', 'kruche'].forEach(k => { n[k] = U.clone(S[k]); }); n.meta.nazwa = `Belka B-${BEAMS.length + 1}`; BEAMS.push(J.normalize(n)); dirty = true; switchBeam(BEAMS.length - 1); }
+function delBeam(i) { beamsSync(); if (BEAMS.length < 2) return; BEAMS.splice(i, 1); if (i < curB) curB--; curB = Math.min(curB, BEAMS.length - 1); S = BEAMS[curB]; dirty = true; $('#projName').value = S.meta.nazwa || ''; rendered = {}; renderInputs(); recalc(); updateTitle(); autosave(); }
+document.addEventListener('click', async e => {
+  const d = e.target.closest && e.target.closest('[data-bdel]'); if (d) { e.stopPropagation(); const i = +d.dataset.bdel; if (await Q.ask(`Usunąć belkę „${esc(BEAMS[i].meta.nazwa || i + 1)}” z projektu?`, 'Usuń', true)) delBeam(i); return; }
+  const t = e.target.closest && e.target.closest('[data-btab]'); if (t) { switchBeam(+t.dataset.btab); return; }
+  if (e.target.closest && e.target.closest('[data-badd]')) addBeam();
+});
+document.addEventListener('dblclick', e => { const t = e.target.closest && e.target.closest('[data-btab]'); if (!t) return; const f = $('#projName'); if (f) { f.focus(); f.select(); } });
+let asT = null;
+function autosave() {
+  clearTimeout(asT);
+  asT = setTimeout(() => {
+    const data = JSON.stringify(Object.assign({ state: S, filePath }, beamsOut()));
+    if (typeof window.hostStore === 'function') { try { window.hostStore(data); } catch (e) { /* */ } }
+    else { try { localStorage.setItem('belkastal-autosave', data); } catch (e) { /* */ } }
+  }, 600);
+}
+A.autosave = autosave;
+A.markDirty = () => { dirty = true; updateTitle(); autosave(); };
+function projectJSON() { return JSON.stringify(Object.assign({ format: BS.FORMAT, program: `${BS.APP} ${BS.VERSION}`, silnik: BS.ENGINE, zapisano: new Date().toISOString(), sha256: J.hash(S), state: S }, beamsOut()), null, 1); }
 A.projectJSON = projectJSON;
-function download(name, content, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([content], { type })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 800); }
+function download(name, content, mime) { const a = document.createElement('a'); a.href = URL.createObjectURL(content instanceof Blob ? content : new Blob([content], { type: mime })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 800); }
 A.download = download;
-async function saveProject(as) {
+async function saveFile(as) {
   if (inHost()) {
     const r = await hostCall('save', { path: as ? '' : filePath, name: safeName('.belkastal'), content: projectJSON(), filter: 'project' });
-    if (r && r.ok) { filePath = r.path; dirty = false; updateTitle(); toast('Zapisano: ' + baseName(r.path)); } else if (r && r.err) toast('Błąd zapisu: ' + r.err);
+    if (r && r.ok) { filePath = r.path; dirty = false; updateTitle(); autosave(); Q.toast('Zapisano: ' + baseName(r.path)); } else if (r && r.err) Q.toast('Błąd zapisu: ' + r.err);
   } else { download(safeName('.belkastal'), projectJSON(), 'application/json'); dirty = false; updateTitle(); }
 }
-function loadProject(text, name) {
+function loadProject(text, path) {
   let o;
   try {
     const t = text.trim();
     if (t.startsWith('<')) { const m = t.match(/<script type="application\/json" id="belkastal-dane">([\s\S]*?)<\/script>/); if (!m) throw new Error('plik HTML nie zawiera danych projektu BelkaStal'); o = JSON.parse(m[1].replace(/<\\\//g, '</')); }
     else o = JSON.parse(t);
-  } catch (e) { toast('Nie można odczytać pliku: ' + e.message, 4000); return; }
-  const dane = o.dane || o;
-  if (o.format && o.format !== BS.FORMAT) toast('Uwaga: inny format pliku – dane zostały uzupełnione.', 3500);
-  S = J.normalize(dane); filePath = name || ''; dirty = false; vStage = null;
-  $('#projName').value = S.meta.nazwa;
-  if (o.sha256 && o.sha256 !== J.hash(dane)) toast('Uwaga: suma kontrolna danych w pliku nie zgadza się z zawartością (plik edytowany ręcznie?).', 5000);
+  } catch (e) { Q.toast('Nie można odczytać pliku: ' + e.message, 4000); return; }
+  const st = o.state || o.dane || o;
+  S = beamsIn(o, st); filePath = path || ''; dirty = false; vStage = null; selSpans.clear(); rendered = {};
+  $('#projName').value = S.meta.nazwa || '';
+  if (o.sha256 && !o.beams && o.sha256 !== J.hash(st)) Q.toast('Uwaga: suma kontrolna danych w pliku nie zgadza się z zawartością (plik edytowany ręcznie?).', 5000);
   renderInputs(); recalc(); updateTitle(); autosave();
 }
-async function openProject() {
-  if (dirty && !(await ask('Niezapisane zmiany zostaną utracone. Otworzyć inny projekt?', 'Otwórz'))) return;
-  if (inHost()) { const r = await hostCall('open', { filter: 'project' }); if (r && r.ok) loadProject(r.content, r.path); else if (r && r.err) toast('Błąd odczytu: ' + r.err); return; }
+A.loadProject = loadProject;
+async function openFile() {
+  if (dirty && !(await Q.ask('Niezapisane zmiany zostaną utracone. Otworzyć inny projekt?', 'Otwórz'))) return;
+  if (inHost()) { const r = await hostCall('open', { filter: 'project' }); if (r && r.ok) loadProject(r.content, r.path); else if (r && r.err) Q.toast('Błąd odczytu: ' + r.err); return; }
   const inp = $('#fileIn'); inp.value = ''; inp.onchange = () => { const f = inp.files[0]; if (f) f.text().then(t => loadProject(t, f.name)); }; inp.click();
 }
 async function newProject() {
-  if (dirty && !(await ask('Niezapisane zmiany zostaną utracone. Utworzyć nowy projekt?', 'Nowy projekt'))) return;
-  S = J.defaultState(); filePath = ''; dirty = false; vStage = null; $('#projName').value = S.meta.nazwa; renderInputs(); recalc(); updateTitle(); autosave();
+  if (dirty && !(await Q.ask('Niezapisane zmiany zostaną utracone. Utworzyć nowy projekt?', 'Nowy projekt'))) return;
+  S = J.defaultState(); BEAMS = null; curB = 0; filePath = ''; dirty = false; vStage = null; selSpans.clear(); rendered = {};
+  $('#projName').value = S.meta.nazwa; renderInputs(); recalc(); updateTitle(); autosave();
 }
-function autosave() { try { localStorage.setItem('belkastal-autosave', JSON.stringify(S)); } catch (e) { /* tryb prywatny */ } }
-async function exportHTML() {
-  if (!R || R.errors.length) { toast('Usuń błędy danych przed eksportem raportu.'); return; }
-  const doc = BS.Raport.document(S, R);
-  const name = safeName(' – raport.html');
-  if (inHost()) { const r = await hostCall('save', { path: '', name, content: doc, filter: 'html' }); if (r && r.ok) toast('Zapisano raport: ' + baseName(r.path)); else if (r && r.err) toast('Błąd: ' + r.err); }
-  else download(name, doc, 'text/html');
+function doPrint() { A.selectTab('report'); setTimeout(() => window.print(), 250); }
+A.doPrint = doPrint;
+function about() {
+  Q.modal(`<h3>BelkaStal ${BS.VERSION}</h3><p>Analiza i projektowanie belek stalowych według Eurokodów (PN-EN z polskimi załącznikami krajowymi): nośność, stateczność, SGU, podpory i połączenia, etapy realizacji, pożar, zmęczenie, kruche pękanie, klasa wykonania.</p>
+  <p><b>Przekroje:</b> IPE, HEA, HEB, HEM, ceowniki UPN/UPE, kątowniki, rury kwadratowe i prostokątne (PN-EN 10210 / 10219), dwuteowniki spawane.</p>
+  <p><b>Silnik:</b> ${esc(BS.ENGINE)} · format danych ${esc(BS.FORMAT)}. Raport zawiera sumę kontrolną SHA-256 danych i pełne dane projektu – plik raportu HTML można ponownie otworzyć w programie.</p>
+  <p><b>Ograniczenia:</b> belki pryzmatyczne; analiza sprężysta I rzędu; skręcanie od mimośrodu obciążeń nie jest analizowane; połączenia przegubowe (bez węzłów momentowych); kątowniki – element stężony.</p>
+  <p class="hint">Skróty: Ctrl+N nowy, Ctrl+O otwórz, Ctrl+S zapisz, Ctrl+P drukuj, F2 – raport, Esc – odznacz / zamknij okno.</p>
+  <div class="dbtn"><button class="btn pri" id="abOk" type="button">Zamknij</button></div>`, 'sm');
+  $('#abOk').onclick = Q.closeModal;
 }
-function doPrint() { selectTab('report'); setTimeout(() => window.print(), 150); }
-A.acts.exporthtml = exportHTML; A.acts.print = doPrint; A.acts.save = () => saveProject(false); A.acts.saveas = () => saveProject(true); A.acts.open = openProject; A.acts.new = newProject; A.acts.about = dlgAbout; A.acts.json = () => download(safeName('.belkastal'), projectJSON(), 'application/json');
-A.acts.status = () => selectTab('sum');
-
-/* ================================================================ ZAKŁADKI */
-function selectTab(t) {
-  tab = t;
-  $$('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
-  $$('.pane').forEach(p => p.classList.toggle('on', p.id === 'p-' + t));
-  renderTab(t);
+function doAct(a) {
+  ({ new: newProject, open: openFile, save: () => saveFile(false), saveas: () => saveFile(true), print: doPrint, exporthtml: () => BS.V.exportHTML(), about,
+    schemes: () => A.schemesPopup(), secwin: () => A.secPopup(), sectab: () => A.secTablePopup(), loads: () => A.loadPopup({ all: true }), snow: () => A.snowPopup() }[a] || (() => {}))();
 }
-A.selectTab = selectTab;
-function renderTab(t) {
-  if (t === 'data' || rendered[t]) return;
-  const el = $('#p-' + t); if (!el) return;
-  const s = vStage === null ? (R && R.md ? R.md.nE - 1 : 0) : vStage;
-  try { el.innerHTML = BS.V[t](S, R, { etap: s, stageSeg: stageSeg(s) }); } catch (e) { console.error(e); el.innerHTML = `<div class="msg err">Błąd widoku: ${esc(e.message)}</div>`; }
-  rendered[t] = true;
-}
+A.doAct = doAct;
 
 /* ================================================================ START */
 function init() {
-  try { const a = localStorage.getItem('belkastal-autosave'); if (a) S = J.normalize(JSON.parse(a)); } catch (e) { S = J.defaultState(); }
-  $('#projName').value = S.meta.nazwa;
-  $('#projName').addEventListener('input', e => { S.meta.nazwa = e.target.value; markDirty(); schedule(800); });
-  const inputs = $('#inputs');
-  inputs.addEventListener('input', onInput); inputs.addEventListener('change', onInput);
-  document.addEventListener('click', onClick);
-  $('#modal').addEventListener('input', e => { if (e.target.dataset.p) { if (e.target.dataset.t === 'list') { setP(e.target.dataset.p, e.target.value.split(';').map(s => s.trim()).filter(Boolean)); markDirty(); return; } onInput(e); } });
-  $('#modal').addEventListener('change', e => { if (e.target.dataset.p && e.target.dataset.t !== 'list') onInput(e); });
-  $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
-  inputs.addEventListener('toggle', e => { const d = e.target; if (d.dataset && d.dataset.g) { if (d.open) openGrp.add(d.dataset.g); else openGrp.delete(d.dataset.g); try { localStorage.setItem('belkastal-grp', JSON.stringify(Array.from(openGrp))); } catch (er) { /* */ } } }, true);
-  $$('.tabs button').forEach(b => { b.onclick = () => selectTab(b.dataset.tab); });
+  let saved = window.__AUTOSAVE || null;
+  if (!saved) { try { saved = JSON.parse(localStorage.getItem('belkastal-autosave') || 'null'); } catch (e) { saved = null; } }
+  if (saved && saved.state) { try { S = beamsIn(saved, saved.state); filePath = saved.filePath || ''; } catch (e) { S = J.defaultState(); } }
+  $('#projName').value = S.meta.nazwa || '';
+  $('#projName').addEventListener('input', e => { S.meta.nazwa = e.target.value; dirty = true; updateTitle(); autosave(); rendered.report = false; const bt = $(`.btab[data-btab="${curB}"] span`); if (bt) bt.textContent = S.meta.nazwa.slice(0, 14); });
+  $$('.tabs button').forEach(b => b.addEventListener('click', () => {
+    $$('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+    $$('.pane').forEach(p => p.classList.toggle('on', p.id === 'p-' + b.dataset.tab));
+    renderActive();
+  }));
+  $$('#top [data-act]').forEach(b => b.addEventListener('click', () => doAct(b.dataset.act)));
+  $('#status').addEventListener('click', () => A.selectTab('sum'));
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && $('#modal').classList.contains('on')) closeModal();
-    if (!(e.ctrlKey || e.metaKey)) return;
     const k = e.key.toLowerCase();
-    if (k === 's') { e.preventDefault(); saveProject(e.shiftKey); } else if (k === 'o') { e.preventDefault(); openProject(); } else if (k === 'p') { e.preventDefault(); doPrint(); } else if (k === 'n' && e.altKey) { e.preventDefault(); newProject(); }
+    if (Q.isModal() && e.key !== 'Escape') return;
+    if (e.ctrlKey && k === 's') { e.preventDefault(); saveFile(e.shiftKey); }
+    else if (e.ctrlKey && k === 'o') { e.preventDefault(); openFile(); }
+    else if (e.ctrlKey && k === 'n') { e.preventDefault(); newProject(); }
+    else if (e.ctrlKey && k === 'p') { e.preventDefault(); doPrint(); }
+    else if (e.key === 'F2') { e.preventDefault(); A.selectTab('report'); }
+    else if (e.key === 'Escape') { const wasM = Q.isModal(), wasC = !!$('.ctxmenu'); Q.closeList(); Q.closeCtx(); if (wasM) Q.closeModal(); if (!wasM && !wasC && selSpans.size) { selSpans.clear(); renderDataSide(); } }
   });
-  window.addEventListener('beforeunload', e => { if (dirty && inHost()) { e.preventDefault(); e.returnValue = ''; } });
-  renderInputs(); recalc(); updateTitle();
+  $('#modal').addEventListener('mousedown', e => { if (e.target.id === 'modal') Q.closeModal(); });
+  // podział zakładki Dane: dane | schemat (przeciąganie)
+  const wrap = () => $('#p-data .datawrap'), setDsl = v => { const w = wrap(); if (w) w.style.setProperty('--dsl', v); };
+  try { const v = localStorage.getItem('bs.dsl'); if (v) setDsl(v); } catch (e) { /* */ }
+  document.addEventListener('pointerdown', e => {
+    const h = e.target.closest && e.target.closest('#dsplit'); if (!h) return;
+    e.preventDefault(); const w = wrap(), r = w.getBoundingClientRect(); h.classList.add('drag'); document.body.classList.add('dsdrag');
+    const mv = ev => { const pc = Math.max(25, Math.min(75, (ev.clientX - r.left) / r.width * 100)); setDsl(pc.toFixed(1) + '%'); };
+    const up = () => { h.classList.remove('drag'); document.body.classList.remove('dsdrag'); window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); try { localStorage.setItem('bs.dsl', w.style.getPropertyValue('--dsl')); } catch (e2) { /* */ } renderDataSide(); };
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+  });
+  let rz = null, lastW = window.innerWidth;
+  window.addEventListener('resize', () => { if (Math.abs(window.innerWidth - lastW) < 40) return; lastW = window.innerWidth; clearTimeout(rz); rz = setTimeout(() => { rendered = {}; renderDataSide(); renderActive(); }, 150); });
+  renderInputs(); recalc(); renderInputs(); updateTitle();
   if (window.__hostOpenFile) loadProject(window.__hostOpenFile.content, window.__hostOpenFile.path);
 }
 A.init = init;
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();

@@ -3,53 +3,55 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="BelkaStal – analiza i projektowanie belek stalowych według Eurokodów (PN-EN) z jawnym profilem normowym i odtwarzalnym raportem.">
+<meta name="description" content="BelkaStal – analiza i projektowanie belek stalowych według Eurokodów (PN-EN 1993) z odtwarzalnym raportem.">
 <title>BelkaStal</title>
 <style id="appcss">/*@CSS@*/</style>
 </head>
 <body>
+
 <header id="top">
   <div class="brand">
-    <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="3" width="26" height="26" rx="3" fill="#dfe6f1" stroke="#9fb3d4"/><path d="M8 8h16v4h-6v8h6v4H8v-4h6v-8H8z" fill="#172235"/><path d="M8 8h16v2H8z" fill="#b5413f"/></svg>
-    <b>BelkaStal</b><button class="tag" data-act="tab" data-tab="data" title="Profil normowy projektu">PN-EN 1993-1-1</button>
+    <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="3" width="26" height="26" rx="3" style="fill:var(--brand1);stroke:var(--brand2)"/><path d="M8 7.5h16v3.2h-6.2v10.6H24v3.2H8v-3.2h6.2V10.7H8z" style="fill:var(--brand3)"/><path d="M8 7.5h16v1.6H8z" style="fill:var(--brand4)"/></svg>
+    <b>BelkaStal</b><span class="tag">PN-EN 1993-1-1</span>
   </div>
   <input id="projName" title="Nazwa elementu" aria-label="Nazwa elementu" spellcheck="false">
   <span id="fileName"></span>
   <div class="tb">
-    <button data-act="new" title="Nowy projekt (Ctrl+Alt+N)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg><span class="lbl">Nowy</span></button>
-    <button data-act="open" title="Otwórz projekt lub raport HTML (Ctrl+O)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10H3z"/></svg><span class="lbl">Otwórz</span></button>
-    <button data-act="save" title="Zapisz (Ctrl+S)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h12l3 3v15H5z"/><path d="M8 3v6h8V3M8 21v-7h8v7"/></svg><span class="lbl">Zapisz</span></button>
-    <button data-act="saveas" title="Zapisz jako (Ctrl+Shift+S)"><span class="lbl">Zapisz jako…</span></button>
+    <button id="bNew" data-act="new" title="Nowy projekt (Ctrl+N)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg><span class="lbl">Nowy</span></button>
+    <button id="bOpen" data-act="open" title="Otwórz plik projektu lub raport HTML (Ctrl+O)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10H3z"/></svg><span class="lbl">Otwórz</span></button>
+    <button id="bSave" data-act="save" title="Zapisz (Ctrl+S)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h12l3 3v15H5z"/><path d="M8 3v6h8V3M8 21v-7h8v7"/></svg><span class="lbl">Zapisz</span></button>
+    <button id="bSaveAs" data-act="saveas" title="Zapisz jako (Ctrl+Shift+S)"><span class="lbl">Zapisz jako…</span></button>
     <span class="sep"></span>
-    <button data-act="print" title="Drukuj raport / zapisz do PDF (Ctrl+P)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="1"/><path d="M7 14h10v7H7z"/></svg><span class="lbl">Drukuj / PDF</span></button>
-    <button data-act="exporthtml" title="Zapisz raport jako plik HTML (z danymi projektu)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg><span class="lbl">Raport HTML</span></button>
-    <button data-act="about" title="O programie" aria-label="O programie">?</button>
+    <button id="bPrint" data-act="print" title="Drukuj raport / zapisz do PDF (Ctrl+P)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="1"/><path d="M7 14h10v7H7z"/></svg><span class="lbl">Drukuj / PDF</span></button>
+    <button id="bExport" data-act="exporthtml" title="Zapisz raport jako plik HTML (z danymi projektu)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg><span class="lbl">Raport HTML</span></button>
+    <button id="bAbout" data-act="about" title="O programie" aria-label="O programie">?</button>
   </div>
-  <button id="status" data-act="status">…</button>
+  <div id="status" title="Kliknij – Podsumowanie">…</div>
 </header>
 <main>
   <section id="out">
     <nav class="tabs">
       <button data-tab="data" class="on">Dane</button>
-      <button data-tab="sec">Przekrój</button>
-      <button data-tab="chart">Wykresy M, V, ugięcia</button>
+      <button data-tab="sec">Przekrój i nośność</button>
+      <button data-tab="chart">Wykresy M, V, N, ugięcia</button>
       <button data-tab="ltb">Stateczność</button>
-      <button data-tab="sup">Podpory i połączenia</button>
+      <button data-tab="elev">Belka i połączenia</button>
       <button data-tab="sum">Podsumowanie</button>
       <button data-tab="report">Raport obliczeń</button>
     </nav>
-    <div class="pane on" id="p-data"><div class="datawrap"><div id="inputs"></div><aside id="dataside"></aside></div></div>
-    <div class="pane" id="p-sec"></div>
-    <div class="pane" id="p-chart"></div>
-    <div class="pane" id="p-ltb"></div>
-    <div class="pane" id="p-sup"></div>
+    <div class="pane on" id="p-data"><div class="datawrap"><div class="dleft"><div id="dsum"></div><div id="autobar"></div><div id="inputs"></div></div><div class="dsplit" id="dsplit" role="separator" aria-orientation="vertical" title="Przeciągnij, aby zmienić podział: dane | schemat"></div><aside id="dataside"></aside></div></div>
     <div class="pane" id="p-sum"></div>
+    <div class="pane xres" id="p-sec"></div>
+    <div class="pane xres" id="p-chart"></div>
+    <div class="pane xres" id="p-ltb"></div>
+    <div class="pane xres" id="p-elev"></div>
     <div class="pane" id="p-report"></div>
   </section>
 </main>
+<div id="pop"></div>
 <div id="modal" role="dialog" aria-modal="true"></div>
+<div id="nmodal" role="dialog" aria-modal="true"></div>
 <div id="toast" role="status"></div>
-<div id="busy">obliczam…</div>
 <input type="file" id="fileIn" accept=".belkastal,.json,.html,application/json,text/html" hidden>
 <!--@SCRIPTS@-->
 </body>

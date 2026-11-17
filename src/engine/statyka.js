@@ -45,7 +45,7 @@ S.model = function (st, sec) {
       id: LIT[i] || ('P' + i), idx: i, x, typ, tymcz: false,
       kv: typ === 'sprezyna' ? Math.max(0, U.num(p.kz) * 1000) : 'fix',            // kN/mm → N/mm
       kr: typ === 'utwierdzenie' ? 'fix' : (typ === 'sprezyna' || typ === 'podatne') ? Math.max(0, U.num(p.kfi) * 1e6) : 0, // kNm/rad → Nmm/rad
-      ltb: p.ltb || (typ === 'utwierdzenie' ? 'pelne' : 'widelkowe'),
+      ltb: p.ltb || (typ === 'utwierdzenie' ? 'pelne' : 'widelkowe'), przesuwna: !!p.przesuwna,
       ss: Math.max(0, U.num(p.ss, 100)), wezel: p.wezel || { typ: 'brak' }, src: p
     };
   });
@@ -101,7 +101,16 @@ S.model = function (st, sec) {
   });
 
   // stężenia boczne
-  const stez = (st.stezenia || []).map(s => ({ x: U.num(s.x) * 1000, typ: s.typ || 'boczne', wys: s.wys || 'pas_g', od: U.clamp(Math.round(U.num(s.odEtapu, 0)), 0, nE - 1), bocznieY: s.bocznieY !== false })).filter(s => s.x >= 0 && s.x <= L);
+  const stez = (st.stezenia || []).map((s, i) => ({ src: i, x: U.num(s.x) * 1000, typ: s.typ || 'boczne', wys: s.wys || 'pas_g', od: U.clamp(Math.round(U.num(s.odEtapu, 0)), 0, nE - 1), bocznieY: s.bocznieY !== false })).filter(s => s.x >= 0 && s.x <= L);
+  // stężenia rozmieszczone równomiernie (rozstaw l_t) w przęsłach
+  const an0 = st.analiza || {}, lt = U.num(an0.ltRozstaw) * 1000;
+  if (lt > 0) {
+    const odL = U.clamp(Math.round(U.num(an0.ltOd, 0)), 0, nE - 1);
+    for (let i = 0; i < spans.length; i++) {
+      const a = xsup[i], b = xsup[i + 1], n = Math.ceil((b - a) / lt - 1e-9);
+      for (let k = 1; k < n; k++) { const x = a + (b - a) * k / n; if (!stez.some(z => Math.abs(z.x - x) < 1)) stez.push({ src: 'g', x, typ: 'boczne', wys: an0.ltWys || 'pas_g', od: odL, bocznieY: true }); }
+    }
+  }
   const ciagle = st.stezenieCiagle || {};
 
   // siatka

@@ -1,268 +1,382 @@
 /* =====================================================================
-   BelkaStal – raport obliczeniowy (notka) z pełnym tokiem obliczeń.
-   Odtwarzalność: wersja programu i silnika, suma SHA-256 kanonicznego
-   JSON danych, osadzone dane projektu (plik HTML można otworzyć w programie).
+   BelkaStal – raport obliczeń (jak w BelkaŻB): raport pełny (pełny tok
+   obliczeń: wzór = podstawienie = wynik [punkt normy]), raport „Statyka”
+   (dane, schemat, obciążenia, wykresy sił wewnętrznych, reakcje),
+   fragmenty „jak obliczono” dla pojedynczych sprawdzeń, zestawienie
+   materiałów.  Odtwarzalność: wersja programu i silnika, SHA-256
+   kanonicznego JSON danych, dane projektu osadzone w pliku HTML.
    ===================================================================== */
 (function (root) {
 'use strict';
-const BS = root.BS, U = BS.U, D = BS.D, N = BS.N, K = BS.K, X = BS.X, S0 = BS.S;
+const BS = root.BS, U = BS.U, D = BS.D, N = BS.N, K = BS.K, S0 = BS.S, M = BS.M;
 const RP = BS.Raport = {};
-const esc = U.esc;
-const f = (v, n) => U.fmt(v, n === undefined ? 2 : n);
-const kN = (v) => U.fmt(v / 1e3, 2), kNm = (v) => U.fmt(v / 1e6, 2);
-const eq = (s, r) => `<div class="eq">${s}${r ? `<span class="r">[${r}]</span>` : ''}</div>`;
-const okS = (u) => (u === null || u === undefined ? '' : u <= 1 + 1e-9 ? '<span class="ok">– warunek spełniony</span>' : '<span class="fail">– warunek NIE spełniony</span>');
-const tbl = (head, rows) => `<table class="grid"><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr>${rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</table>`;
-const ubT = (c) => (c.util === null || c.util === undefined ? (c.info ? 'inf.' : '—') : (isFinite(c.util) ? Math.round(c.util * 100) + '%' : '∞'));
-const stT = (c) => (c.info ? 'INFO' : c.status === 'ok' ? '<span class="ok">OK</span>' : c.status === 'warn' ? '<span class="warn">UWAGA</span>' : '<span class="fail">NIE</span>');
+const esc = (s) => String(s === undefined || s === null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const fm = (v, dp) => (BS.Q ? BS.Q.fmt(v, dp) : U.fmt(v, dp));
+const f = (v, n) => fm(v, n === undefined ? 2 : n);
+const kN = (v) => fm(v / 1e3, 2), kNm = (v) => fm(v / 1e6, 2);
+const sym = (s) => esc(s).replace(/_\{([^}]*)\}/g, '<sub>$1</sub>').replace(/\^\{([^}]*)\}/g, '<sup>$1</sup>');
+// linia równania: lhs = wzór = podstawienie = wynik [jedn.] status [ref]
+const eq = (lhs, fx, sub, val, unit, ref, stt) => {
+  let s = `<div class="eq">${sym(lhs)}`;
+  if (fx) s += ` = ${fx}`;
+  if (sub) s += ` = ${sub}`;
+  if (val !== undefined && val !== null && val !== '') s += ` = <b>${val}</b>`;
+  if (unit) s += ` ${unit}`;
+  if (stt) s += ` <span class="${stt[0]}">${stt[1]}</span>`;
+  if (ref) s += `<span class="r">[${ref}]</span>`;
+  return s + '</div>';
+};
+const line = (t, ref) => `<div class="eq">${t}${ref ? `<span class="r">[${esc(ref)}]</span>` : ''}</div>`;
+const okS = (u) => (u === null || u === undefined ? '' : u <= 1 + 1e-9 ? ' <span class="ok">✔ warunek spełniony</span>' : ' <span class="fail">✖ warunek NIESPEŁNIONY</span>');
+const kv = (pairs) => pairs.filter(q => q && q[1] !== '' && q[1] !== undefined && q[1] !== null).map(([k, v]) => `<div class="eq">${k}: ${v}</div>`).join('');
+const tbl = (head, rows) => `<table class="rtab"><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr>${rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</table>`;
+const mk = (id, html) => `<!--ck:${id}-->${html}<!--/ck:${id}-->`;
+const WYS = { pas_g: 'pas górny', srodek: 'środek ścinania', pas_d: 'pas dolny' };
+const SUPN = { przegub: 'przegubowa', utwierdzenie: 'utwierdzenie', sprezyna: 'sprężysta', podatne: 'przegub + sprężyna obrotowa' };
+const WEZN = { brak: 'oparcie na stali', oparcie: 'płyta podporowa', blacha_czolowa: 'krótka blacha czołowa', blacha_zebrowa: 'blacha żebrowa' };
+const V0 = (v, unit) => (v === null || v === undefined || !isFinite(v)) ? '—' : unit === 'M' ? f(v / 1e6) + ' kNm' : unit === 'F' ? f(v / 1e3) + ' kN' : unit === 'q' ? f(v, 1) + ' N/mm' : unit === 'mm' ? f(v, 1) + ' mm' : f(v, 3);
+RP.unitFmt = V0;
 
-RP.build = function (S, R) {
+/* ---------------------------------------------------------- dane wykresów (zakładka Wykresy i raport) */
+RP.charts = function (S, R, s, W) {
+  const md = R.md, an = R.an, ev = R.env[s], x = Array.from(an.xs).map(v => v / 1000), sup = md.systems[s].map(p => ({ x: p.x / 1000, l: p.id }));
+  const arr = (a, k) => Array.from(a).map(v => (isFinite(v) ? v * k : 0));
+  const mx = (y) => { let i = 0; y.forEach((v, j) => { if (v > y[i]) i = j; }); return i; }, mn = (y) => { let i = 0; y.forEach((v, j) => { if (v < y[i]) i = j; }); return i; };
+  const marks = (y, c, dp) => { const a = mx(y), b = mn(y), o = []; if (Math.abs(y[a]) > 1e-6) o.push({ x: x[a], y: y[a], c, l: f(y[a], dp) }); if (b !== a && Math.abs(y[b]) > 1e-6) o.push({ x: x[b], y: y[b], c, l: f(y[b], dp) }); return o; };
+  const out = {};
+  const Mmax = arr(ev.Mmax, 1e-6), Mmin = arr(ev.Mmin, 1e-6), hseg = [];
+  if (R.base) { hseg.push({ x0: 0, x1: md.L / 1000, y: R.base.Mc_pos / 1e6, c: '#1d7f3c', l: `M_c,Rd = ${f(R.base.Mc_pos / 1e6, 1)}` }); if (Math.min(...Mmin) < -1e-3) hseg.push({ x0: 0, x1: md.L / 1000, y: -R.base.Mc_neg / 1e6, c: '#1d7f3c', l: `−M_c,Rd` }); }
+  const L2 = R.ltb && R.ltb[s]; if (L2) L2.segs.forEach(sg => { if (!sg.brak && sg.ltb && !sg.ltb.skip) hseg.push({ x0: sg.sg.x0 / 1000, x1: sg.sg.x1 / 1000, y: (sg.Mpos ? 1 : -1) * sg.Mb / 1e6, c: '#a35d00', l: `M_b,Rd = ${f(sg.Mb / 1e6, 1)}` }); });
+  out.M = { W, H: 230, kind: 'M', short: 'M', title: `Momenty zginające M_Ed [kNm] – obwiednia SGN${md.nE > 1 ? `, etap ${s + 1}` : ''} (po stronie włókien rozciąganych)`, yl: 'M [kNm]', unit: 'kNm', dp: 1, invert: true, vl: sup, hseg, series: [{ x, y: Mmax, c: '#c0262d', l: 'M_Ed,max', fill: 'rgba(192,38,45,.10)' }, { x, y: Mmin, c: '#c0262d', l: '', dash: '', fill: 'rgba(192,38,45,.10)' }], marks: marks(Mmax, '#c0262d', 1).concat(marks(Mmin, '#c0262d', 1)).filter((q, i, a) => a.findIndex(z => Math.abs(z.x - q.x) < 1e-6 && Math.abs(z.y - q.y) < 1e-6) === i) };
+  const Vmax = arr(ev.Vmax, 1e-3), Vmin = arr(ev.Vmin, 1e-3), Vr = R.base ? (R.sb && R.sb.need ? Math.min(R.base.Vpl, R.sb.Vb) : R.base.Vpl) / 1e3 : null;
+  out.V = { W, H: 200, kind: 'V', short: 'V', title: 'Siły poprzeczne V_Ed [kN] – obwiednia SGN', yl: 'V [kN]', unit: 'kN', dp: 1, vl: sup, hl: Vr ? [{ y: Vr, c: '#1d7f3c', l: `V_Rd = ${f(Vr, 1)}` }, { y: -Vr, c: '#1d7f3c', l: '−V_Rd' }] : [], series: [{ x, y: Vmax, c: '#1d5bb8', l: 'V_Ed', fill: 'rgba(29,91,184,.10)' }, { x, y: Vmin, c: '#1d5bb8', l: '', fill: 'rgba(29,91,184,.10)' }], marks: marks(Vmax, '#1d5bb8', 1).concat(marks(Vmin, '#1d5bb8', 1)) };
+  if (isFinite(ev.Nmax) && (Math.abs(ev.Nmax) > 1 || Math.abs(ev.Nmin) > 1)) out.N = { W, H: 150, kind: 'N', short: 'N', title: 'Siła podłużna N_Ed [kN] (+ rozciąganie)', yl: 'N [kN]', unit: 'kN', dp: 1, vl: sup, series: [{ x, y: x.map(() => ev.Nmax / 1e3), c: '#155e2c', l: 'N_Ed,max' }, { x, y: x.map(() => ev.Nmin / 1e3), c: '#155e2c', l: 'N_Ed,min', dash: '5 3' }] };
+  const Mz = arr(ev.Mzmax, 1e-6), Mz2 = arr(ev.Mzmin, 1e-6);
+  if (Math.max(...Mz.map(Math.abs), ...Mz2.map(Math.abs)) > 1e-3) out.Mz = { W, H: 170, kind: 'Mz', short: 'M_z', title: 'Momenty zginające M_z,Ed [kNm] (obciążenia poziome)', yl: 'M_z [kNm]', unit: 'kNm', dp: 2, invert: true, vl: sup, series: [{ x, y: Mz, c: '#6a3fb5', l: 'M_z,Ed', fill: 'rgba(106,63,181,.10)' }, { x, y: Mz2, c: '#6a3fb5', l: '', fill: 'rgba(106,63,181,.10)' }] };
+  const w = arr(ev.wmax, 1), w2 = arr(ev.wmin, 1), hs = [];
+  if (s === md.nE - 1 && R.sgu) R.sgu.seg.forEach(q => hs.push({ x0: q.sg.x0 / 1000, x1: q.sg.x1 / 1000, y: q.limMax, c: '#a35d00', l: `${q.sg.wsp ? '2L' : 'L'}/${S.sgu.wmax} = ${f(q.limMax, 1)}` }));
+  out.w = { W, H: 190, kind: 'w', short: 'w', title: `Ugięcia w [mm] – kombinacje charakterystyczne${md.nE > 1 ? `, etap ${s + 1}` : ''} (bez podniesienia wykonawczego)`, yl: 'w [mm]', unit: 'mm', dp: 1, invert: true, vl: sup, hseg: hs, series: [{ x, y: w, c: '#1d7f3c', l: 'w_max', fill: 'rgba(29,127,60,.10)' }, { x, y: w2, c: '#1d7f3c', l: 'w_min', dash: '4 3' }], marks: marks(w, '#1d7f3c', 1) };
+  return out;
+};
+
+/* ---------------------------------------------------------- zestawienie materiałów */
+RP.takeoff = function (S, R) {
+  const md = R.md, sec = R.sec, rows = [];
+  if (!md || !sec) return { rows, total: 0 };
+  const rho = 7.85e-6; // kg/mm³
+  const Lb = md.L; rows.push({ poz: 1, n: `Belka ${sec.nazwa}`, mat: `${S.material.gatunek}${S.material.podgatunek}`, szt: 1, wym: `L = ${f(Lb, 0)} mm`, m: sec.masa * Lb / 1000 });
+  let poz = 2; const bolts = {}; let weld = 0;
+  md.sup.forEach((p, i) => {
+    const w = (S.podpory[i] || {}).wezel || {};
+    if (w.typ === 'blacha_czolowa') { rows.push({ poz: poz++, n: `Blacha czołowa – podpora ${p.id}`, mat: S.material.gatunek, szt: 1, wym: `${f(U.num(w.tp), 0)}×${f(U.num(w.bp), 0)}×${f(U.num(w.hp), 0)}`, m: rho * U.num(w.tp) * U.num(w.bp) * U.num(w.hp) }); const k = `${w.d} kl. ${w.kl}`; bolts[k] = (bolts[k] || 0) + 2 * Math.max(1, Math.round(U.num(w.nr))); weld += 2 * U.num(w.hp); }
+    else if (w.typ === 'blacha_zebrowa') { const bw = U.num(w.z) + U.num(w.e2b); rows.push({ poz: poz++, n: `Blacha żebrowa – podpora ${p.id}`, mat: S.material.gatunek, szt: 1, wym: `${f(U.num(w.tp), 0)}×${f(bw + 10, 0)}×${f(U.num(w.hp), 0)}`, m: rho * U.num(w.tp) * (bw + 10) * U.num(w.hp) }); const k = `${w.d} kl. ${w.kl}`; bolts[k] = (bolts[k] || 0) + Math.max(1, Math.round(U.num(w.n))); weld += 2 * U.num(w.hp); }
+    else if (w.typ === 'oparcie' && w.podloze !== 'stal') rows.push({ poz: poz++, n: `Płyta podporowa – podpora ${p.id}`, mat: S.material.gatunek, szt: 1, wym: `${f(U.num(w.tp), 0)}×${f(U.num(w.bp), 0)}×${f(U.num(w.lp), 0)}`, m: rho * U.num(w.tp) * U.num(w.bp) * U.num(w.lp) });
+    if (w.zebro && (sec.kind === 'I' || sec.kind === 'U')) { const hs = sec.hw || (sec.h - sec.tg - sec.td); rows.push({ poz: poz++, n: `Żebra podporowe – podpora ${p.id}`, mat: S.material.gatunek, szt: sec.kind === 'U' ? 1 : 2, wym: `${f(U.num(w.ts), 0)}×${f(U.num(w.bs), 0)}×${f(hs, 0)}`, m: (sec.kind === 'U' ? 1 : 2) * rho * U.num(w.ts) * U.num(w.bs) * hs }); weld += (sec.kind === 'U' ? 2 : 4) * hs; }
+  });
+  const a = U.num((S.analiza || {}).zebraRozstaw) * 1000;
+  if (a > 0 && (sec.kind === 'I' || sec.kind === 'U')) { let n = 0; for (let x = a; x < md.L - 1; x += a) n++; if (n) { const hs = sec.hw || sec.h, bs = Math.max(40, Math.round(((sec.bg || 100) - (sec.tw || 0)) / 2 - 5)), ts = Math.max(6, Math.ceil((sec.tw || 6))); rows.push({ poz: poz++, n: 'Żebra pośrednie środnika (pary)', mat: S.material.gatunek, szt: 2 * n, wym: `${ts}×${bs}×${f(hs, 0)}`, m: 2 * n * rho * ts * bs * hs }); } }
+  const tot = rows.reduce((q, r) => q + r.m, 0);
+  return { rows, total: tot, bolts, weld, surf: (sec.AmV ? null : null), area: R.pozar && R.pozar.sf ? null : null };
+};
+
+/* ---------------------------------------------------------- raport pełny */
+RP.build = function (S, R, opt) {
+  opt = opt || {};
   const md = R.md, sec = R.sec, b = R.base, mat = R.mat, ndp = R.ndp, an = R.an;
-  const nE = md.nE, fin = nE - 1;
-  let h = '';
-  let sn = 0; const H2 = (t) => `<h2>${++sn}. ${t}</h2>`;
-  // ---------------------------------------------------------- nagłówek
-  h += `<h1>Obliczenia belki stalowej – ${esc(S.meta.nazwa)}</h1>`;
-  h += `<p>${esc(S.meta.obiekt || '')}</p>`;
-  h += `<table class="meta">${[
-    ['Element', esc(S.meta.nazwa)], ['Opis', esc(S.meta.opis || '—')], ['Projektant', esc(S.meta.projektant || '—') + (S.meta.nrUprawnien ? ', upr. ' + esc(S.meta.nrUprawnien) : '')], ['Sprawdzający', esc(S.meta.sprawdzajacy || '—')], ['Data opracowania', esc(S.meta.data || '—')],
-    ['Program', `${BS.APP} ${BS.VERSION}; silnik: ${esc(BS.ENGINE)}`], ['Podstawa normowa', `${R.norm.genStosowana}. generacja Eurokodów, ${esc(N.KRAJE[R.norm.kraj] || R.norm.kraj)}`],
-    ['Suma kontrolna danych (SHA-256)', `<span class="mono">${R.hash}</span>`]
-  ].map(r => `<tr><td>${r[0]}</td><td><b>${r[1]}</b></td></tr>`).join('')}</table>`;
+  const nE = md.nE;
+  let h = '', sn = 0; const H2 = (t) => `<h2>${++sn}. ${t}</h2>`;
   const vOk = !R.nFail && !R.errors.length;
-  h += `<div class="verdict ${vOk ? 'ok' : 'fail'}">${vOk ? `Wszystkie warunki nośności, stateczności i użytkowalności są spełnione. Maksymalne wytężenie: ${U.pct(R.uMax)} – ${esc(R.gov ? R.gov.n : '')}.` : `Niespełnione warunki: ${R.nFail}. Maksymalne wytężenie: ${isFinite(R.uMax) ? U.pct(R.uMax) : '∞'} – ${esc(R.gov ? R.gov.n : '')}.`}${R.nWarn ? ` Ostrzeżenia: ${R.nWarn}.` : ''}</div>`;
-
-  // ---------------------------------------------------------- 1. profil normowy
-  const no = R.norm, P0 = S.normy;
-  h += H2('Podstawa normowa – profil normowy projektu');
-  h += tbl(['Pozycja', 'Wartość'], [
-    ['Kraj stosowania', esc(N.KRAJE[no.kraj] || no.kraj)], ['Generacja wybrana', `${no.genZadana}. – ${esc(N.GENERACJE[no.genZadana])}`], ['Generacja zastosowana', `<b>${no.genStosowana}.</b>`],
-    ['Decyzja i uzasadnienie', esc(no.decyzja)], ['Data weryfikacji zestawu', esc(P0.dataWeryfikacji || '— (nie podano)')], ['Weryfikował(a)', esc(P0.zweryfikowal || '— (nie podano)')], ['Źródło weryfikacji', esc(P0.zrodloWeryfikacji || '—')]
+  // ---------------------------------------------------------- nagłówek
+  h += `<h1>Obliczenia statyczno-wytrzymałościowe belki stalowej – ${esc(S.meta.nazwa)}</h1>`;
+  const meta = [['Obiekt', esc(S.meta.obiekt)], ['Projektant', esc(S.meta.projektant) + (S.meta.nrUprawnien ? ', upr. ' + esc(S.meta.nrUprawnien) : '')], ['Sprawdzający', esc(S.meta.sprawdzajacy)], ['Data', esc(S.meta.data)]].filter(q => q[1]);
+  if (meta.length) h += kv(meta);
+  // ---------------------------------------------------------- 1. dane wejściowe
+  h += H2('Dane wejściowe');
+  const sch = (BS.J.SCHEMATY.find(q => q.id === S.schemat) || {}).n;
+  h += kv([
+    ['Schemat statyczny', `${esc(sch || 'belka ' + (md.spans.length > 1 ? 'ciągła' : 'jednoprzęsłowa'))}${md.spans.length ? ` – ${md.spans.length} przęs${md.spans.length === 1 ? 'ło' : md.spans.length < 5 ? 'ła' : 'eł'}` : ''}${md.wL ? ', wspornik lewy' : ''}${md.wP ? ', wspornik prawy' : ''}`],
+    ['Rozpiętości', md.seg.map(q => `${esc(q.n)} ${f((q.x1 - q.x0) / 1000)} m`).join('; ') + `; długość belki L = ${f(md.L / 1000)} m`],
+    ['Przekrój', `${esc(sec.nazwa)} (${esc(BS.P.RODZAJE[S.przekroj.typ].n)})`],
+    ['Stal', `${esc(mat.gatunek)}${esc(mat.podgatunek)} wg ${esc((M.STAL[mat.gatunek] || {}).norma)}`],
+    ['Podpory', md.sup.map((p, i) => `${p.id} (x = ${f(p.x / 1000)} m): ${SUPN[p.typ] || p.typ}${p.przesuwna ? ' przesuwna' : ''}, ${p.ltb === 'pelne' ? 'utwierdzenie dla zwichrzenia' : 'podparcie widełkowe'}, ${WEZN[((S.podpory[i] || {}).wezel || {}).typ || 'brak']}`).join('; ') + (md.tmp.length ? `; montażowe: ${md.tmp.map(t => `${t.id} x = ${f(t.x / 1000)} m (usuwana po etapie ${t.do + 1})`).join(', ')}` : '')],
+    ['Etapy', nE > 1 ? md.etapy.map((e, s) => `${s + 1}. ${esc(e.nazwa)} (${e.typ === 'montaz' ? 'sytuacja przejściowa' : 'sytuacja trwała'})`).join('; ') : 'jeden etap – eksploatacja (sytuacja trwała)'],
+    ['Stężenia boczne', (md.stez.length ? md.stez.map(z => `${z.typ} x = ${f(z.x / 1000)} m (${WYS[z.wys]}${nE > 1 ? `, od etapu ${z.od + 1}` : ''})`).join('; ') : 'brak stężeń dyskretnych') + (md.ciagle.pasG ? `; pas górny stężony ciągle${nE > 1 ? ` od etapu ${U.num(md.ciagle.odEtapu) + 1}` : ''}` : '') + (md.ciagle.pasD ? '; pas dolny stężony ciągle' : '')],
+    ['Ugięcia graniczne', `w<sub>max</sub> ≤ L/${esc(String(S.sgu.wmax))}, w<sub>3</sub> ≤ L/${esc(String(S.sgu.w3))}${S.sgu.podniesienie !== 'brak' ? `, podniesienie wykonawcze ${S.sgu.podniesienie === 'auto' ? 'równe ugięciu od G' : f(U.num(S.sgu.wc), 0) + ' mm'}` : ''}`],
+    ['Klasa konsekwencji / wykonania', `${esc(S.wykonanie.CC)} / ${R.exc ? R.exc.exc : '—'}`],
+    ['Podstawa normowa', `Eurokody ${R.norm.genStosowana}. generacji z polskimi załącznikami krajowymi (PN-EN 1990, PN-EN 1991, PN-EN 1993-1-1, -1-5, -1-8${S.pozar.aktywny ? ', -1-2' : ''}${S.zmeczenie.aktywny ? ', -1-9' : ''}, -1-10; PN-EN 1090-2)`]
   ]);
-  if (no.genZadana === 2 && no.braki2.length) h += `<p class="note">Braki zestawu 2. generacji dla zakresu projektu: ${no.braki2.map(esc).join('; ')}.</p>`;
-  h += '<h3>Dokumenty normowe stosowane (zakres projektu)</h3>';
-  h += tbl(['Dokument (wydanie)', 'Zmiany', 'Poprawki', 'Załącznik krajowy', 'Zakres zastosowania', 'Zweryf.'], no.dokumenty.map(d => [`<b>${esc(d.oznaczenie)}</b><br><span class="note">${esc(d.tytul)}</span>`, esc(d.zmiany.join('; ') || '—'), esc(d.poprawki.join('; ') || '—'), esc(d.zk || '—') + (d.zkStatus ? `<br><span class="note">${esc(d.zkStatus)}</span>` : ''), esc(d.zakres), d.zweryfikowano ? 'tak' : '<span class="warn">nie</span>']));
-  h += '<h3>Normy wyrobów i wykonawcze</h3>' + tbl(['Norma', 'Wydanie EN', 'Zakres'], N.WYROBY.map(w => [esc(w.oznaczenie), esc(w.en), esc(w.zakres)]));
-  h += '<h3>Parametry ustalane krajowo (NDP) zastosowane w obliczeniach</h3>';
-  h += tbl(['Parametr', 'Wartość', 'Punkt normy', 'Źródło'], Object.keys(N.NDP1_PL).map(k => { const d = N.NDP1_PL[k]; const ch = no.ndpZmienione.includes(k); return [esc(d.d), `<b>${esc(typeof ndp[k] === 'number' ? U.fmt(ndp[k], 3).replace(/,?0+$/, '') : String(ndp[k]))}</b>${ch ? ' <span class="warn">(zmieniono)</span>' : ''}`, esc(d.ref), esc(d.z) + (d.sp ? ' – do potwierdzenia z ZK' : '')]; }));
-  h += `<p class="note">Stan wiedzy programu na ${esc(N.STAN_WIEDZY.data)}: ${N.STAN_WIEDZY.tekst.map(esc).join(' ')}</p>`;
-  if (no.ostrz.length || no.bledy.length) h += no.bledy.concat(no.ostrz).map(t => `<p class="warn">${esc(t)}</p>`).join('');
-
-  // ---------------------------------------------------------- 2. założenia
-  h += H2('Założenia i dane wejściowe');
-  h += '<h3>Schemat statyczny i geometria</h3>';
-  h += `<p>Długość belki L = ${f(md.L / 1000)} m; przęsła: ${md.spans.map((s, i) => `L<sub>${i + 1}</sub> = ${f(s / 1000)} m`).join(', ')}${md.wL ? `; wspornik lewy ${f(md.wL / 1000)} m` : ''}${md.wP ? `; wspornik prawy ${f(md.wP / 1000)} m` : ''}.</p>`;
-  h += tbl(['Podpora', 'x [m]', 'Rodzaj', 'Warunek dla zwichrzenia', 'ss / c [mm]', 'Węzeł'], md.sup.map(p => [p.id, f(p.x / 1000), esc(p.typ) + (p.kv !== 'fix' ? ` (kz = ${f(p.kv / 1000, 1)} kN/mm)` : '') + (p.kr && p.kr !== 'fix' ? ` (kφ = ${f(p.kr / 1e6, 0)} kNm/rad)` : ''), p.ltb === 'pelne' ? 'pełne utwierdzenie (u = u′ = φ = φ′ = 0)' : 'widełkowe (u = φ = 0)', `${f(p.ss, 0)} / ${f(U.num(p.src && p.src.c), 0)}`, esc(({ brak: 'oparcie na stali', oparcie: 'płyta podporowa (' + ((p.wezel || {}).podloze || '') + ')', blacha_czolowa: 'krótka blacha czołowa', blacha_zebrowa: 'blacha żebrowa' })[(p.wezel || {}).typ || 'brak'] || '—')]).concat(md.tmp.map(t => [t.id + ' (tymcz.)', f(t.x / 1000), 'przegubowa, montażowa', 'widełkowe', f(t.ss, 0), `usuwana po etapie ${t.do + 1}`])));
-  h += '<h3>Etapy realizacji</h3>';
-  h += tbl(['Etap', 'Sytuacja obliczeniowa', 'Podpory czynne', 'Stężenia czynne', 'Przypadki obciążeń wprowadzane'], md.etapy.map((e, s) => [`${s + 1}. ${esc(e.nazwa)}${e.opis ? `<br><span class="note">${esc(e.opis)}</span>` : ''}`, e.typ === 'montaz' ? 'przejściowa (montaż)' : 'trwała (eksploatacja)', md.systems[s].map(p => p.id).join(', '), md.stez.filter(z => z.od <= s).map(z => `${z.typ} x = ${f(z.x / 1000)} m (${z.wys})`).concat((md.ciagle.pasG && U.num(md.ciagle.odEtapu) <= s) ? ['ciągłe – pas górny'] : []).concat((md.ciagle.pasD && U.num(md.ciagle.odEtapuD) <= s) ? ['ciągłe – pas dolny'] : []).join('; ') || '—', md.cases.filter(c => c.etap === s).map(c => esc(c.id)).join(', ') || '—']));
-  h += '<p class="note">Analiza etapowa: obciążenia stałe wprowadzone w etapie k obciążają układ podpór tego etapu; po usunięciu podpory tymczasowej jej reakcja jest przykładana przeciwnie do układu kolejnego etapu (zachowanie sił „zamrożonych”). Obciążenia zmienne działają w etapie przypisania.</p>';
-  md.etapy.forEach((e, s) => { h += `<div class="fig">${D.scheme(S, md, { etap: s, width: 900 })}<div class="note">Etap ${s + 1}: ${esc(e.nazwa)}</div></div>`; });
-  h += '<h3>Materiał</h3>';
-  h += `<p>Stal ${esc(mat.gatunek)}${esc(mat.podgatunek)} wg ${esc((BS.M.STAL[mat.gatunek] || {}).norma)}; t<sub>max</sub> = ${f(mat.tMax, 1)} mm → f<sub>y</sub> = ${mat.fy} MPa, f<sub>u</sub> = ${mat.fu} MPa (${esc(mat.zr)}); E = 210 000 MPa, G = 81 000 MPa, ν = 0,3; ciężar 78,5 kN/m³; ε = √(235/f<sub>y</sub>) = ${f(b.eps, 3)}.</p>`;
-  h += '<h3>Przekrój</h3>';
+  if (S.meta.opis) h += `<p class="note">${esc(S.meta.opis)}</p>`;
+  // ---------------------------------------------------------- 2. podstawa normowa
+  const no = R.norm;
+  h += H2('Podstawa normowa');
+  h += no.dokumenty.map(d => line(`<b>${esc(d.oznaczenie)}</b> – ${esc(d.tytul)}${d.zmiany.length ? `; zmiany: ${esc(d.zmiany.join(', '))}` : ''}${d.poprawki.length ? `; poprawki: ${esc(d.poprawki.join(', '))}` : ''}${d.zk ? `; ZK: ${esc(d.zk)}` : ''} – ${esc(d.zakres)}`)).join('');
+  h += line('Normy wyrobów i wykonania: ' + N.WYROBY.map(w => esc(w.oznaczenie)).join('; '));
+  h += line(`Parametry krajowe (NDP): γ<sub>M0</sub> = ${f(ndp.gM0)}, γ<sub>M1</sub> = ${f(ndp.gM1)}, γ<sub>M2</sub> = ${f(ndp.gM2)}, γ<sub>G,sup</sub> = ${f(ndp.gG_sup)}, γ<sub>G,inf</sub> = ${f(ndp.gG_inf)}, γ<sub>Q</sub> = ${f(ndp.gQ)}, ξ = ${f(ndp.xi)}, K<sub>FI</sub> = ${f(ndp.KFI)}, η = ${f(ndp.eta)}, λ̄<sub>LT,0</sub> = ${f(ndp.lamLT0)}, β = ${f(ndp.betaLT)}${no.ndpZmienione.length ? ` (zmienione względem ZK: ${esc(no.ndpZmienione.join(', '))})` : ''}`);
+  h += `<p class="note">Zestaw dokumentów wg stanu wiedzy programu na ${esc(N.STAN_WIEDZY.data)}. ${esc(no.decyzja || '')}</p>`;
+  // ---------------------------------------------------------- 3. materiał i przekrój
+  h += H2('Parametry materiałowe i przekrój');
+  h += line(`Stal ${esc(mat.gatunek)}${esc(mat.podgatunek)}: t<sub>max</sub> = ${f(mat.tMax, 1)} mm → f<sub>y</sub> = ${mat.fy} MPa, f<sub>u</sub> = ${mat.fu} MPa (${esc(mat.zr)}); E = 210 000 MPa, G = 81 000 MPa, ν = 0,3; ciężar 78,5 kN/m³`, 'tabl. 3.1');
+  h += eq('ε', '√(235/f_{y})', `√(235/${mat.fy})`, f(b.eps, 3), '', '');
   h += `<div class="fig">${D.section(sec, { size: 240, eff: b.effNeg || b.effPos })}</div>`;
-  h += `<p>${esc(sec.nazwa)}: h = ${f(sec.h, 1)} mm, b<sub>g</sub> × t<sub>g</sub> = ${f(sec.bg, 0)} × ${f(sec.tg, 1)} mm, b<sub>d</sub> × t<sub>d</sub> = ${f(sec.bd, 0)} × ${f(sec.td, 1)} mm, t<sub>w</sub> = ${f(sec.tw, 1)} mm${sec.r ? `, r = ${f(sec.r, 0)} mm` : ''}${sec.aw ? `, spoiny a = ${f(sec.aw, 1)} mm` : ''}.</p>`;
-  h += `<p>A = ${f(sec.A / 100)} cm², I<sub>y</sub> = ${f(sec.Iy / 1e4, 0)} cm⁴, I<sub>z</sub> = ${f(sec.Iz / 1e4, 1)} cm⁴, W<sub>el,y</sub> = ${f(sec.Wel_t / 1e3, 1)} / ${f(sec.Wel_b / 1e3, 1)} cm³ (góra/dół), W<sub>pl,y</sub> = ${f(sec.Wpl_y / 1e3, 1)} cm³, W<sub>pl,z</sub> = ${f(sec.Wpl_z / 1e3, 1)} cm³, I<sub>t</sub> = ${f(sec.It / 1e4)} cm⁴, I<sub>w</sub> = ${f(sec.Iw / 1e9, 1)}·10³ cm⁶, i<sub>y</sub> = ${f(sec.iy / 10)} cm, i<sub>z</sub> = ${f(sec.iz / 10)} cm${!sec.sym ? `, z<sub>s</sub> − z<sub>c</sub> = ${f(sec.z0, 1)} mm, β<sub>z</sub> = ${f(sec.betaZ, 1)} mm` : ''}; masa ${f(sec.masa, 1)} kg/m. Charakterystyki obliczone z geometrii przekroju (wielobok z zaokrągleniami).</p>`;
-  h += '<h3>Oddziaływania (wartości charakterystyczne)</h3>';
-  const wysN = { pas_g: 'pas górny', srodek: 'środek ścinania', pas_d: 'pas dolny' };
-  h += tbl(['Przypadek', 'Rodzaj / kategoria', 'Etap', 'Układ / grupa', 'ψ<sub>0</sub>/ψ<sub>1</sub>/ψ<sub>2</sub>', 'Składniki'], md.cases.map(c => [`<b>${esc(c.id)}</b> – ${esc(c.nazwa)}`, esc(S0.RODZAJE[c.rodzaj].n) + (c.rodzaj === 'Q' ? '<br>' + esc((N.PSI[c.kat] || {}).n || c.kat) : ''), String(c.etap + 1), S0.RODZAJE[c.rodzaj].stale ? 'jednolite źródło' : `${c.uklad === 'szachownica' ? 'niekorzystnie w przęsłach' : 'w całości'}${c.wyklucz ? ` / grupa „${esc(c.wyklucz)}”` : ''}`, S0.RODZAJE[c.rodzaj].stale || c.rodzaj === 'A' ? '—' : K.psi(c).map(v => f(v, 2)).join(' / '),
-    c.parts.map(p => p.typ === 'q' ? `q = ${f(p.q0)}${p.q1 !== p.q0 ? '…' + f(p.q1) : ''} kN/m, x = ${f(p.x0 / 1000)}–${f(p.x1 / 1000)} m, ${p.kier === 'y' ? 'poziomo' : wysN[p.wys]}` : p.typ === 'P' ? `P = ${f(p.P / 1000)} kN, x = ${f(p.x / 1000)} m, ${p.kier === 'y' ? 'poziomo' : wysN[p.wys]}, ss = ${f(p.ss, 0)} mm` : `M = ${f(p.M / 1e6)} kNm, x = ${f(p.x / 1000)} m`).join('<br>') + (c.Nn ? `<br>N = ${f(c.Nn / 1000)} kN` : '')]));
-  h += '<h3>Kombinacje oddziaływań (PN-EN 1990)</h3>';
-  const gS = ndp.gG_sup * ndp.KFI;
-  h += ndp.komb === '6.10' ? eq(`E<sub>d</sub> = Σ γ<sub>G,j</sub>·G<sub>k,j</sub> + γ<sub>Q,1</sub>·Q<sub>k,1</sub> + Σ γ<sub>Q,i</sub>·ψ<sub>0,i</sub>·Q<sub>k,i</sub>; γ<sub>G,sup</sub> = ${f(gS)}, γ<sub>G,inf</sub> = ${f(ndp.gG_inf)}, γ<sub>Q</sub> = ${f(ndp.gQ * ndp.KFI)}`, '6.10')
-    : eq(`mniej korzystna z: Σ γ<sub>G,j</sub>·G<sub>k,j</sub> + γ<sub>Q,1</sub>·ψ<sub>0,1</sub>·Q<sub>k,1</sub> + Σ γ<sub>Q,i</sub>·ψ<sub>0,i</sub>·Q<sub>k,i</sub> (6.10a) oraz Σ ξ·γ<sub>G,j</sub>·G<sub>k,j</sub> + γ<sub>Q,1</sub>·Q<sub>k,1</sub> + Σ γ<sub>Q,i</sub>·ψ<sub>0,i</sub>·Q<sub>k,i</sub> (6.10b); γ<sub>G,sup</sub> = ${f(gS)} (K<sub>FI</sub> = ${f(ndp.KFI)}), γ<sub>G,inf</sub> = ${f(ndp.gG_inf)}, γ<sub>Q</sub> = ${f(ndp.gQ * ndp.KFI)}, ξ = ${f(ndp.xi)}`, '6.10a, 6.10b, tabl. A1.2(B)');
-  h += eq('SGU: charakterystyczna G + Q<sub>k,1</sub> + Σψ<sub>0,i</sub>Q<sub>k,i</sub> (6.14b); częsta G + ψ<sub>1,1</sub>Q<sub>k,1</sub> + Σψ<sub>2,i</sub>Q<sub>k,i</sub> (6.15b); quasi-stała G + Σψ<sub>2,i</sub>Q<sub>k,i</sub> (6.16b)');
-  h += eq(`EQU: γ<sub>G,sup</sub> = ${f(ndp.gG_sup_equ)}, γ<sub>G,inf</sub> = ${f(ndp.gG_inf_equ)}, γ<sub>Q</sub> = ${f(ndp.gQ_equ)} – części G w segmentach rozdzielone na korzystne i niekorzystne`, 'tabl. A1.2(A)');
-  if (S.pozar.aktywny || md.cases.some(c => c.rodzaj === 'A')) h += eq(`sytuacje wyjątkowa i pożarowa: G + A<sub>d</sub> + (${ndp.psiAcc === 'psi2' ? 'ψ<sub>2,1</sub>' : 'ψ<sub>1,1</sub>'})·Q<sub>k,1</sub> + Σψ<sub>2,i</sub>Q<sub>k,i</sub>`, '6.11b');
-  const cnt = {}; R.combos.forEach(c => { const k = c.typ + '|' + c.etap; cnt[k] = (cnt[k] || 0) + 1; });
-  h += `<p class="note">Przegląd kombinacji: ${Object.keys(cnt).map(k => { const [t, s] = k.split('|'); return `${({ SGN: 'SGN', char: 'charakterystyczne', czest: 'częste', qp: 'quasi-stałe', kruche: 'do doboru stali', poz: 'pożarowe', wyj: 'wyjątkowe' })[t] || t} (etap ${+s + 1}): ${cnt[k]}`; }).join('; ')}. Obciążenia zmienne – wszystkie podzbiory, każde jako wiodące; układy w przęsłach: ${K.patterns(md).map(p => esc(p.n)).join('; ')}.</p>`;
-
-  // ---------------------------------------------------------- 3. analiza
-  h += H2('Analiza statyczna');
-  h += `<p>Analiza sprężysta I rzędu metodą elementów skończonych (belka Eulera–Bernoulliego, ${md.xs.length - 1} elementów, dokładne M(x), V(x) w elementach), osobno w płaszczyźnie pionowej (I<sub>y</sub>) i poziomej (I<sub>z</sub>). Siły wewnętrzne dla kombinacji – superpozycja wyników przypadków (z historią etapów).</p>`;
-  for (let s = 0; s < nE; s++) {
-    const ev = R.env[s], sup = md.systems[s].map(p => p.x);
-    h += `<h3>Etap ${s + 1}: ${esc(md.etapy[s].nazwa)}</h3>`;
-    h += `<div class="fig">${D.plot({ xs: an.xs, L: md.L, width: 900, height: 190, sup, title: 'Obwiednia M_Ed [kNm] (SGN)', scale: 1e-6, series: [{ y: ev.Mmax, col: D.C.M, fill: true }, { y: ev.Mmin, col: D.C.M, fill: true }] })}</div>`;
-    h += `<div class="fig">${D.plot({ xs: an.xs, L: md.L, width: 900, height: 170, sup, title: 'Obwiednia V_Ed [kN] (SGN)', scale: 1e-3, down: false, series: [{ y: ev.Vmax, col: D.C.V, fill: true }, { y: ev.Vmin, col: D.C.V, fill: true }] })}</div>`;
-    if (Math.max(...Array.from(ev.Mzmax).map(Math.abs)) > 1) h += `<div class="fig">${D.plot({ xs: an.xs, L: md.L, width: 900, height: 160, sup, title: 'Obwiednia M_z,Ed [kNm]', scale: 1e-6, series: [{ y: ev.Mzmax, col: D.C.z, fill: true }, { y: ev.Mzmin, col: D.C.z, fill: true }] })}</div>`;
-    h += `<div class="fig">${D.plot({ xs: an.xs, L: md.L, width: 900, height: 160, sup, title: 'Ugięcia w [mm] – kombinacje charakterystyczne', dec: 1, series: [{ y: ev.wmax, col: D.C.w, fill: true }, { y: ev.wmin, col: D.C.w, dash: '4 2' }] })}</div>`;
-    h += tbl(['Podpora', 'R<sub>Ed,max</sub> [kN]', 'R<sub>Ed,min</sub> [kN]', '|M<sub>Ed</sub>| [kNm]'].concat(Object.keys(an.res[s]).map(k => `R<sub>k</sub> ${esc(an.res[s][k].c.id)} [kN]`)), md.systems[s].map(p => { const r = ev.R[p.id] || {}; return [p.id, kN(r.max), kN(r.min), kNm(r.Mmax || 0)].concat(Object.keys(an.res[s]).map(k => { const q = an.res[s][k].tot.R[p.id]; return q ? kN(q.R) : '—'; })); }));
-  }
-
-  // ---------------------------------------------------------- 4. nośność przekroju
-  h += H2('Stan graniczny nośności – nośność przekroju (PN-EN 1993-1-1, 6.2)');
-  const cl = (k, t) => `<p><b>${t}</b> – klasa ${k.cls}: ${k.all.map(p => `${esc(p.n)}: c/t = ${f(p.c, 1)}/${f(p.t, 1)} = ${f(p.ct, 2)} → kl. ${p.cls} (granice ${p.lim.map(l => isFinite(l) ? f(l, 1) : '—').join('/')})`).join('; ')}.</p>`;
-  h += '<h3>Klasyfikacja przekroju (tabl. 5.2)</h3>' + cl(b.kPos, 'Zginanie M > 0') + cl(b.kNeg, 'Zginanie M < 0') + cl(b.kN, 'Ściskanie');
-  [['effPos', 'M > 0'], ['effNeg', 'M < 0'], ['effN', 'ściskanie']].forEach(([k, t]) => { const e = b[k]; if (!e) return; h += `<p>Przekrój efektywny (${t}) wg PN-EN 1993-1-5, 4.4: ${e.info.map(i => `${esc(i.el)}: λ̄<sub>p</sub> = (c/t)/(28,4ε√k<sub>σ</sub>) = ${f(i.lp, 3)}, k<sub>σ</sub> = ${f(i.kS, 2)}${i.psi !== undefined ? `, ψ = ${f(i.psi, 3)}` : ''}, ρ = ${f(i.rho, 3)}`).join('; ')} → A<sub>eff</sub> = ${f(e.A / 100)} cm²${e.Weff ? `, W<sub>eff,min</sub> = ${f(e.Weff / 1e3, 1)} cm³` : ''}.</p>`; });
+  const dimTxt = sec.kind === 'I' ? `h = ${f(sec.h, 1)} mm, b<sub>g</sub> × t<sub>g</sub> = ${f(sec.bg, 0)} × ${f(sec.tg, 1)} mm, b<sub>d</sub> × t<sub>d</sub> = ${f(sec.bd, 0)} × ${f(sec.td, 1)} mm, t<sub>w</sub> = ${f(sec.tw, 1)} mm${sec.r ? `, r = ${f(sec.r, 0)} mm` : ''}${sec.aw ? `, spoiny pas–środnik a = ${f(sec.aw, 1)} mm` : ''}`
+    : sec.kind === 'U' ? `h = ${f(sec.h, 1)} mm, b = ${f(sec.b, 0)} mm, t<sub>w</sub> = ${f(sec.tw, 1)} mm, t<sub>f</sub> = ${f(sec.tg, 1)} mm${sec.r ? `, r = ${f(sec.r, 1)} mm` : ''}; środek ścinania e<sub>S</sub> = ${f(sec.eSC, 1)} mm od środnika`
+    : sec.kind === 'L' ? `h × b × t = ${f(sec.h, 0)} × ${f(sec.b, 0)} × ${f(sec.t, 1)} mm${sec.r ? `, r = ${f(sec.r, 1)} mm` : ''}; ramię poziome ${sec.poz === 'gora' ? 'u góry' : 'u dołu'}; osie główne: α = ${f(sec.alfa * 180 / Math.PI, 1)}°, I<sub>u</sub> = ${f(sec.Iu / 1e4, 1)} cm⁴, I<sub>v</sub> = ${f(sec.Iv / 1e4, 1)} cm⁴`
+    : `h × b × t = ${f(sec.h, 0)} × ${f(sec.b, 0)} × ${f(sec.t, 1)} mm, promienie naroży r<sub>o</sub> = ${f(sec.ro, 1)} / r<sub>i</sub> = ${f(sec.ri, 1)} mm`;
+  h += line(`${esc(sec.nazwa)}: ${dimTxt}`);
+  h += line(`A = ${f(sec.A / 100)} cm², I<sub>y</sub> = ${f(sec.Iy / 1e4, 0)} cm⁴, I<sub>z</sub> = ${f(sec.Iz / 1e4, 1)} cm⁴, W<sub>el,y</sub> = ${f(sec.Wel_t / 1e3, 1)} / ${f(sec.Wel_b / 1e3, 1)} cm³ (góra / dół), W<sub>pl,y</sub> = ${f(sec.Wpl_y / 1e3, 1)} cm³, W<sub>el,z</sub> = ${f(sec.Wel_z / 1e3, 1)} cm³, W<sub>pl,z</sub> = ${f(sec.Wpl_z / 1e3, 1)} cm³, I<sub>t</sub> = ${f(sec.It / 1e4)} cm⁴, I<sub>w</sub> = ${f(sec.Iw / 1e9, 2)}·10³ cm⁶${Math.abs(sec.z0 || 0) > 0.5 ? `, z<sub>s</sub> − z<sub>c</sub> = ${f(sec.z0, 1)} mm, β<sub>z</sub> = ${f(sec.betaZ, 1)} mm` : ''}; masa ${f(sec.masa, 1)} kg/m (g<sub>k</sub> = ${f(sec.gk, 3)} kN/m)`);
+  (sec.uwagi || []).forEach(t => { h += `<p class="note">${esc(t)}</p>`; });
+  const cl = (k, t) => line(`<b>${t}</b> – klasa ${k.cls}: ${k.all.map(p => `${esc(p.n)}: c/t = ${f(p.c, 1)}/${f(p.t, 1)} = ${f(p.ct, 2)}${p.tension ? ' (rozciągana)' : ` → kl. ${p.cls} (granice ${p.lim.map(l => isFinite(l) ? f(l, 1) : '—').join(' / ')})`}`).join('; ')}`, 'tabl. 5.2');
+  h += '<h3>Klasyfikacja przekroju</h3>' + cl(b.kPos, 'Zginanie M > 0') + cl(b.kNeg, 'Zginanie M < 0') + cl(b.kN, 'Ściskanie');
+  [['effPos', 'M > 0'], ['effNeg', 'M < 0'], ['effN', 'ściskanie']].forEach(([k, t]) => { const e = b[k]; if (!e) return; h += line(`Przekrój efektywny (${t}): ${e.info.map(i => `${esc(i.el)}: λ̄<sub>p</sub> = ${f(i.lp, 3)}, k<sub>σ</sub> = ${f(i.kS, 2)}${i.psi !== undefined ? `, ψ = ${f(i.psi, 3)}` : ''}, ρ = ${f(i.rho, 3)}`).join('; ')} → A<sub>eff</sub> = ${f(e.A / 100)} cm²${e.Weff ? `, W<sub>eff,min</sub> = ${f(e.Weff / 1e3, 1)} cm³` : ''}`, 'PN-EN 1993-1-5, 4.4'); });
+  h += eq('M_{c,Rd}', 'W_{y}·f_{y}/γ_{M0}', `${f(b.Wy_pos / 1e3, 1)}·10³·${mat.fy}/${f(ndp.gM0)}`, kNm(b.Mc_pos), 'kNm', '6.13–6.15') + (Math.abs(b.Mc_neg - b.Mc_pos) > 1 ? eq('M_{c,Rd}^{−}', '', '', kNm(b.Mc_neg), 'kNm') : '');
+  h += eq('A_{v}', '', '', f(b.Av / 100), 'cm²', '6.2.6(3)') + eq('V_{pl,Rd}', 'A_{v}·f_{y}/(√3·γ_{M0})', `${f(b.Av, 0)}·${mat.fy}/(√3·${f(ndp.gM0)})`, kN(b.Vpl), 'kN', '6.18');
+  h += eq('N_{pl,Rd}', 'A·f_{y}/γ_{M0}', '', kN(b.Npl), 'kN', '6.6');
+  // ---------------------------------------------------------- 4. schemat i obciążenia
+  h += staticPart(S, R, H2, true);
+  // ---------------------------------------------------------- 5. nośność przekroju
+  h += H2('SGN – nośność przekroju (PN-EN 1993-1-1, 6.2)');
   for (let s = 0; s < nE; s++) {
     const cs = R.checks.filter(c => c.etap === s && c.grp.startsWith('SGN – nośność'));
     if (!cs.length) continue;
-    h += `<h3>Etap ${s + 1}: ${esc(md.etapy[s].nazwa)}</h3>`;
-    cs.forEach(c => {
-      const d = c.d || {};
-      if (c.id.endsWith('-M')) {
-        const p = d.p || {};
-        h += `<p><b>${esc(c.n)}</b> – x = ${f(c.x / 1000)} m; ${esc(c.combo)}</p>`;
-        h += eq(`M<sub>Ed</sub> = ${kNm(Math.abs(d.M))} kNm${Math.abs(d.N) > 1 ? `, N<sub>Ed</sub> = ${kN(d.N)} kN` : ''}${Math.abs(d.Mz) > 1 ? `, M<sub>z,Ed</sub> = ${kNm(Math.abs(d.Mz))} kNm` : ''}, V<sub>Ed</sub> = ${kN(Math.abs(d.V))} kN`);
-        const W = p.cls <= 2 ? sec.Wpl_y : p.cls === 3 ? Math.min(sec.Wel_t, sec.Wel_b) : (d.M >= 0 ? b.effPos : b.effNeg || {}).Weff;
-        h += eq(`M<sub>c,Rd</sub> = W·f<sub>y</sub>/γ<sub>M0</sub> = ${f(W / 1e3, 1)}·10³·${mat.fy}/${f(ndp.gM0)} = ${kNm(W * mat.fy / ndp.gM0)} kNm (W = ${p.cls <= 2 ? 'W<sub>pl,y</sub>' : p.cls === 3 ? 'W<sub>el,min</sub>' : 'W<sub>eff,min</sub>'})`, '6.13–6.15');
-        if (p.rho > 0) h += eq(`V<sub>Ed</sub> > 0,5·V<sub>pl,Rd</sub>: ρ = (2V<sub>Ed</sub>/V<sub>pl,Rd</sub> − 1)² = ${f(p.rho, 4)} → M<sub>V,Rd</sub> = ${kNm(p.McRd)} kNm`, '6.2.8');
-        if (p.MN && Math.abs(d.N) > 1) h += eq(`M<sub>N,Rd</sub> = ${kNm(p.MN)} kNm (oś obojętna plastyczna przy N<sub>Ed</sub>)`, '6.2.9.1');
-        h += eq(`${p.f === '6.41' ? `(M<sub>y,Ed</sub>/M<sub>N,y,Rd</sub>)<sup>α</sup> + (M<sub>z,Ed</sub>/M<sub>N,z,Rd</sub>)<sup>β</sup>` : p.cls >= 3 && (Math.abs(d.N) > 1 || Math.abs(d.Mz) > 1) ? 'σ<sub>x,Ed</sub>/(f<sub>y</sub>/γ<sub>M0</sub>)' : `M<sub>Ed</sub>/M<sub>${Math.abs(d.N) > 1 && p.cls <= 2 ? 'N' : 'c'},Rd</sub>`} = ${f(c.util, 3)} ≤ 1,0 ${okS(c.util)}`, p.f);
-      } else if (c.id.endsWith('-V')) {
-        h += `<p><b>${esc(c.n)}</b> – x = ${f(c.x / 1000)} m</p>`;
-        h += eq(`A<sub>v</sub> = ${sec.typ === 'walc' ? `max(A − 2b·t<sub>f</sub> + (t<sub>w</sub> + 2r)t<sub>f</sub>; η·h<sub>w</sub>·t<sub>w</sub>)` : 'η·h<sub>w</sub>·t<sub>w</sub>'} = ${f(b.Av / 100)} cm² (η = ${f(b.eta, 2)}); V<sub>pl,Rd</sub> = A<sub>v</sub>·f<sub>y</sub>/(√3·γ<sub>M0</sub>) = ${kN(b.Vpl)} kN`, '6.18');
-        h += eq(`V<sub>Ed</sub>/V<sub>pl,Rd</sub> = ${kN(c.Ed)}/${kN(c.Rd)} = ${f(c.util, 3)} ≤ 1,0 ${okS(c.util)}`, '6.17');
-      } else {
-        h += eq(`${esc(c.n)}: ${esc(V0(c.Ed, c.unit))} / ${esc(V0(c.Rd, c.unit))} = ${f(c.util, 3)} ${okS(c.util)}`, esc(c.ref));
-      }
-    });
+    if (nE > 1) h += `<h3>Etap ${s + 1}: ${esc(md.etapy[s].nazwa)}</h3>`;
+    cs.forEach(c => { h += mk(c.id, checkSec(c, R)); });
   }
-
-  // ---------------------------------------------------------- 5. PN-EN 1993-1-5
-  h += H2('Środnik – PN-EN 1993-1-5');
+  // ---------------------------------------------------------- 6. środnik
   const sb = R.sb;
-  h += eq(`h<sub>w</sub>/t<sub>w</sub> = ${f(sec.hw, 1)}/${f(sec.tw, 1)} = ${f(sb.ht, 1)} ${sb.need ? '>' : '≤'} ${sb.a === Infinity ? '72ε/η' : '31ε√k<sub>τ</sub>/η'} = ${f(sb.limit, 1)} → ${sb.need ? 'wymagane sprawdzenie wyboczenia przy ścinaniu' : 'wyboczenie przy ścinaniu nie występuje'}`, '5.1(2)');
-  if (sb.need) {
-    h += eq(`λ̄<sub>w</sub> = ${sb.a === Infinity ? 'h<sub>w</sub>/(86,4·t·ε)' : `h<sub>w</sub>/(37,4·t·ε·√k<sub>τ</sub>), k<sub>τ</sub> = ${f(sb.kt, 3)}`} = ${f(sb.lw, 3)}; χ<sub>w</sub> = ${f(sb.chi, 3)} (${sb.rigid ? 'sztywny' : 'niesztywny'} słupek podporowy); V<sub>b,Rd</sub> = χ<sub>w</sub>·f<sub>yw</sub>·h<sub>w</sub>·t/(√3·γ<sub>M1</sub>) = ${kN(sb.Vb)} kN (udział pasów V<sub>bf,Rd</sub> pominięto – bezpiecznie)`, '5.2, 5.3, tabl. 5.1');
+  if (sec.kind === 'I' || sec.kind === 'U' || sec.kind === 'RHS') {
+    h += H2('Środnik – PN-EN 1993-1-5');
+    h += line(`h<sub>w</sub>/t<sub>w</sub> = ${f(sec.hw, 1)}/${f(sec.tw || sec.t, 1)} = ${f(sb.ht, 1)} ${sb.need ? '>' : '≤'} ${sb.a === Infinity ? '72ε/η' : '31ε√k<sub>τ</sub>/η'} = ${f(sb.limit, 1)} → ${sb.need ? 'wymagane sprawdzenie wyboczenia przy ścinaniu' : 'wyboczenie przy ścinaniu nie występuje'}`, '5.1(2)');
+    if (sb.need) h += eq('λ̄_{w}', sb.a === Infinity ? 'h_{w}/(86,4·t·ε)' : `h_{w}/(37,4·t·ε·√k_{τ}), k_{τ} = ${f(sb.kt, 3)}`, '', f(sb.lw, 3), '', '5.3') + eq('χ_{w}', '', `${sb.rigid ? 'sztywny' : 'niesztywny'} słupek podporowy`, f(sb.chi, 3), '', 'tabl. 5.1') + eq('V_{b,Rd}', 'χ_{w}·f_{yw}·h_{w}·t/(√3·γ_{M1})', '', kN(sb.Vb), 'kN', '5.2');
+    R.checks.filter(c => c.grp.startsWith('PN-EN 1993-1-5')).forEach(c => {
+      let t = '';
+      if (/^pt\d+$/.test(c.id)) t = patchTxt(c.d, c.n);
+      else if (/-MV$/.test(c.id)) t = line(`<b>${esc(c.n)}</b> (x = ${f(c.x / 1000)} m): η̄<sub>1</sub> = M<sub>Ed</sub>/M<sub>pl,Rd</sub> = ${f(c.d.im.e1, 3)}, η̄<sub>3</sub> = V<sub>Ed</sub>/V<sub>bw,Rd</sub> = ${f(c.d.im.e3, 3)}; ${esc(c.d.im.f)} → ${f(c.util, 3)}${okS(c.util)}`, '7.1');
+      else if (/-Vb$/.test(c.id)) t = line(`<b>${esc(c.n)}</b> (x = ${f(c.x / 1000)} m; ${esc(c.combo)}): V<sub>Ed</sub>/V<sub>b,Rd</sub> = ${kN(c.Ed)}/${kN(c.Rd)} = ${f(c.util, 3)}${okS(c.util)}`, '5.2');
+      else t = line(`<b>${esc(c.n)}</b>: ${f(c.d.eta2, 3)} + 0,8·${f(c.d.eta1, 3)} = ${f(c.Ed, 3)} ≤ 1,4${okS(c.util)}`, '7.2');
+      h += mk(c.id, t);
+    });
   }
-  R.checks.filter(c => c.grp.startsWith('PN-EN 1993-1-5')).forEach(c => {
-    if (c.id.startsWith('pt') && !c.id.endsWith('i')) h += patchTxt(c.d, c.n);
-    else h += eq(`${esc(c.n)}: ${c.unit === '-' ? f(c.Ed, 3) + ' / ' + f(c.Rd, 2) : esc(V0(c.Ed, c.unit)) + ' / ' + esc(V0(c.Rd, c.unit))} → wytężenie ${f(c.util, 3)} ${okS(c.util)}`, esc(c.ref));
-  });
-
-  // ---------------------------------------------------------- 6. stateczność
-  h += H2('Stateczność – zwichrzenie i interakcja (PN-EN 1993-1-1, 6.3)');
-  h += `<p>Sprężysty moment krytyczny M<sub>cr</sub> wyznaczono metodą elementów skończonych (funkcje Hermite'a dla u i φ; ${md.xl.length - 1} elementów) z równania K<sub>E</sub>·x = α<sub>cr</sub>·K<sub>G</sub>·x, gdzie K<sub>G</sub> zawiera: sprzężenie od rozkładu M<sub>y</sub>(x) kombinacji, wpływ wysokości przyłożenia obciążeń względem środka ścinania${sec.sym ? '' : ', człon monosymetrii β<sub>z</sub>'}; więzy: podpory (widełkowe lub pełne), stężenia dyskretne i ciągłe na wysokości pasa. Najmniejsza dodatnia wartość własna α<sub>cr</sub> dotyczy całej belki; M<sub>cr,seg</sub> = α<sub>cr</sub>·|M<sub>Ed,max,seg</sub>|. Krzywe zwichrzenia: ${R.ltb.some(l => l && l.met === '6.3.2.2') ? 'tabl. 6.4 (6.3.2.2)' : 'tabl. 6.5 (6.3.2.3)'}.</p>`;
-  R.ltb.forEach((L, s) => {
+  // ---------------------------------------------------------- 7. stateczność
+  h += H2('SGN – stateczność: zwichrzenie i interakcja (PN-EN 1993-1-1, 6.3)');
+  if (sec.kind === 'L') h += `<p class="note">Kątownik – element przyjęty jako stężony bocznie na całej długości (zwichrzenie wykluczone konstrukcyjnie); stężenie należy zapewnić.</p>`;
+  else h += `<p>Sprężysty moment krytyczny M<sub>cr</sub> wyznaczono metodą elementów skończonych (u, u′, φ, φ′) z równania K<sub>E</sub>·x = α<sub>cr</sub>·K<sub>G</sub>·x dla rozkładu M<sub>y</sub>(x) każdej decydującej kombinacji, z wysokością przyłożenia obciążeń względem środka ścinania${Math.abs(sec.betaZ || 0) > 0.5 ? ', członem monosymetrii β<sub>z</sub>' : ''}, warunkami podparcia (widełkowe / pełne) i stężeniami. M<sub>cr,seg</sub> = α<sub>cr</sub>·|M<sub>Ed,max,seg</sub>|.</p>`;
+  (R.ltb || []).forEach((L, s) => {
     if (!L) return;
-    h += `<h3>Etap ${s + 1}: ${esc(md.etapy[s].nazwa)}</h3>`;
-    h += tbl(['Kombinacja', 'α<sub>cr</sub>'], L.runs.map(r => [esc(r.combo.opis), r.err ? esc(r.err) : r.lam === Infinity ? '∞' : f(r.lam, 3)]));
-    L.segs.forEach(g => {
-      if (g.brak) return;
-      const l = g.ltb;
-      h += `<p><b>Segment ${f(g.sg.x0 / 1000)}–${f(g.sg.x1 / 1000)} m</b>${g.sg.free ? ' (wspornik)' : ''} – ${esc(g.combo.opis)}</p>`;
-      h += eq(`|M<sub>Ed,max</sub>| = ${kNm(g.sh.mabs)} kNm (${g.Mpos ? 'ściskany pas górny' : 'ściskany pas dolny'}); M<sub>cr</sub> = ${g.Mcr === Infinity ? '∞' : `${f(g.alphaCr, 3)}·${kNm(g.sh.mabs)} = ${kNm(g.Mcr)} kNm`}`);
-      h += eq(`λ̄<sub>LT</sub> = √(W<sub>y</sub>·f<sub>y</sub>/M<sub>cr</sub>) = √(${f(g.Wy / 1e3, 1)}·10³·${mat.fy}/${g.Mcr === Infinity ? '∞' : f(g.Mcr, 0)}) = ${f(g.lam, 3)} (W<sub>y</sub> – przekrój kl. ${g.cls})`, '6.56');
-      if (l.skip) h += eq(`λ̄<sub>LT</sub> ≤ λ̄<sub>LT,0</sub> = ${f(l.lam0, 2)} lub M<sub>Ed</sub>/M<sub>cr</sub> ≤ λ̄<sub>LT,0</sub>² → χ<sub>LT</sub> = 1,0 (zwichrzenie można pominąć)`, '6.3.2.2(4)');
-      else {
-        h += eq(`krzywa ${l.curve}: α<sub>LT</sub> = ${f(l.alLT, 2)}; Φ<sub>LT</sub> = 0,5[1 + α<sub>LT</sub>(λ̄<sub>LT</sub> − ${f(l.lam0, 2)}) + ${l.met === '6.3.2.3' ? f(l.beta, 2) + '·' : ''}λ̄<sub>LT</sub>²] = ${f(l.phi, 3)}; χ<sub>LT</sub> = ${f(l.chi, 3)}`, l.met === '6.3.2.3' ? '6.57' : '6.56');
-        if (l.met === '6.3.2.3') h += eq(`k<sub>c</sub> = ${f(l.kc, 3)} (${esc(l.kcSrc || '')}); f = 1 − 0,5(1 − k<sub>c</sub>)[1 − 2(λ̄<sub>LT</sub> − 0,8)²] = ${f(l.f, 3)}; χ<sub>LT,mod</sub> = χ<sub>LT</sub>/f = ${f(l.chimod, 3)}`, '6.58, tabl. 6.6');
-      }
-      h += eq(`M<sub>b,Rd</sub> = χ<sub>LT${l.met === '6.3.2.3' ? ',mod' : ''}</sub>·W<sub>y</sub>·f<sub>y</sub>/γ<sub>M1</sub> = ${kNm(g.Mb)} kNm; M<sub>Ed</sub>/M<sub>b,Rd</sub> = ${f(g.u, 3)} ≤ 1,0 ${okS(g.u)}`, '6.54, 6.55');
-    });
+    if (nE > 1) h += `<h3>Etap ${s + 1}: ${esc(md.etapy[s].nazwa)}</h3>`;
+    h += line('Mnożniki krytyczne: ' + L.runs.map(r => `${esc(r.combo.opis)}: α<sub>cr</sub> = ${r.err ? esc(r.err) : r.lam === Infinity ? '∞' : f(r.lam, 3)}`).join('; '));
+    L.segs.forEach((g, k) => { if (g.brak) return; h += mk(`${s}-LT${k}`, ltbTxt(g, mat, ndp)); });
     const gov = L.runs.filter(r => r.mode).sort((a, b2) => a.lam - b2.lam)[0];
-    if (gov && gov.lam <= 100) h += `<div class="fig">${D.mode(gov.mode, md.L, md.systems[s].map(p => p.x), { width: 900, title: `Postać zwichrzenia, etap ${s + 1}: α_cr = ${U.fmt(gov.lam, 3)}` })}</div>`;
-    L.inter.forEach(it => {
-      h += `<p><b>Interakcja – segment ${f(it.sg.x0 / 1000)}–${f(it.sg.x1 / 1000)} m</b> (${esc(it.combo.opis)})</p>`;
-      h += eq(`N<sub>Ed</sub> = ${kN(it.Nc)} kN, M<sub>y,Ed</sub> = ${kNm(it.My)} kNm, M<sub>z,Ed</sub> = ${kNm(it.Mz)} kNm; L<sub>cr,y</sub> = ${f(it.Lcy / 1000)} m, L<sub>cr,z</sub> = ${f(it.Lcz / 1000)} m; λ̄<sub>y</sub> = ${f(it.ly, 3)}, λ̄<sub>z</sub> = ${f(it.lz, 3)}, λ̄<sub>T</sub> = ${f(it.lT, 3)}; χ<sub>y</sub> = ${f(it.chiy, 3)} (krzywa ${it.curves.y}), χ<sub>z</sub> = ${f(it.chiz, 3)}, χ<sub>T</sub> = ${f(it.chiT, 3)} (krzywa ${it.curves.z}); χ<sub>LT</sub> = ${f(it.chiLT, 3)}`, '6.3.1');
-      h += eq(`C<sub>my</sub> = ${f(it.Cmy, 3)}, C<sub>mz</sub> = ${f(it.Cmz, 3)}, C<sub>mLT</sub> = ${f(it.CmLT, 3)}; k<sub>yy</sub> = ${f(it.kyy, 3)}, k<sub>yz</sub> = ${f(it.kyz, 3)}, k<sub>zy</sub> = ${f(it.kzy, 3)}, k<sub>zz</sub> = ${f(it.kzz, 3)}`, 'zał. B, tabl. B.1–B.3');
-      h += eq(`(6.61): ${f(it.u61, 3)} ≤ 1,0 ${okS(it.u61)}; (6.62): ${f(it.u62, 3)} ≤ 1,0 ${okS(it.u62)}`, '6.61, 6.62');
-    });
+    if (gov && gov.lam <= 100) h += `<div class="fig">${D.mode(gov.mode, md.L, md.systems[s].map(p => p.x), { width: 900, title: `Postać zwichrzenia${nE > 1 ? `, etap ${s + 1}` : ''}: α_cr = ${f(gov.lam, 3)}` })}</div>`;
+    L.inter.forEach((it, k) => { h += mk(`${s}-I${k}`, interTxt(it)); });
   });
-
-  // ---------------------------------------------------------- 7. SGU
-  h += H2('Stan graniczny użytkowalności');
+  // ---------------------------------------------------------- 8. SGU
+  h += H2('SGU – ugięcia i drgania');
   const sg = R.sgu;
-  h += `<p>Kryteria: w<sub>max</sub> ≤ L/${esc(String(S.sgu.wmax))}, w<sub>3</sub> ≤ L/${esc(String(S.sgu.w3))} (wspornik: L = 2·L<sub>w</sub>); ugięcia względem cięciwy łączącej podpory przęsła. Podniesienie wykonawcze: ${S.sgu.podniesienie === 'brak' ? 'brak' : S.sgu.podniesienie === 'auto' ? `równe ugięciu od G (w<sub>c,max</sub> = ${f(sg.wcMax, 1)} mm)` : `w<sub>c</sub> = ${f(U.num(S.sgu.wc), 1)} mm (kształt wg ugięcia od G)`}.</p>`;
-  sg.seg.forEach(r => { h += eq(`${esc(r.sg.n)}: w<sub>max</sub> = ${f(Math.max(0, r.wmax), 1)} mm ≤ ${f(r.limMax, 1)} mm; w<sub>3</sub> = ${f(Math.max(0, r.w3), 1)} mm ≤ ${f(r.lim3, 1)} mm ${okS(Math.max(r.wmax / r.limMax, r.w3 / r.lim3))}`, 'PN-EN 1990 A1.4.3'); });
-  (sg.montaz || []).forEach(m => { h += eq(`Etap ${m.etap + 1} (${esc(md.etapy[m.etap].nazwa)}): ugięcie charakterystyczne w = ${f(m.w, 1)} mm (x = ${f(m.x / 1000)} m) – informacyjnie (wpływ na niwelację, podniesienie, montaż)`); });
-  if (sg.f1) h += eq(`Pierwsza częstotliwość drgań własnych (MES, masa z G + Σψ<sub>2</sub>·Q): f<sub>1</sub> = ${f(sg.f1, 2)} Hz ${sg.f1 >= U.num(S.sgu.fmin, 3) ? '≥' : '<'} f<sub>min</sub> = ${f(U.num(S.sgu.fmin, 3), 1)} Hz ${okS(U.num(S.sgu.fmin, 3) / sg.f1)}`, 'PN-EN 1990 A1.4.4; PN-EN 1993-1-1 7.2.3');
-
-  // ---------------------------------------------------------- 8. podpory i połączenia
+  h += `<p>Kryteria: w<sub>max</sub> ≤ L/${esc(String(S.sgu.wmax))}, w<sub>3</sub> ≤ L/${esc(String(S.sgu.w3))} (wspornik: L = 2·L<sub>w</sub>); ugięcia względem cięciwy podpór przęsła, kombinacje charakterystyczne z historią etapów. Podniesienie wykonawcze: ${S.sgu.podniesienie === 'brak' ? 'brak' : S.sgu.podniesienie === 'auto' ? `równe ugięciu od G (w<sub>c,max</sub> = ${f(sg.wcMax, 1)} mm)` : `w<sub>c</sub> = ${f(U.num(S.sgu.wc), 1)} mm`}.</p>`;
+  sg.seg.forEach((r) => { h += mk(`w-${r.sg.id}`, line(`${esc(r.sg.n)}: w<sub>max</sub> = ${f(Math.max(0, r.wmax), 1)} mm ≤ ${r.sg.wsp ? '2L' : 'L'}/${S.sgu.wmax} = ${f(r.limMax, 1)} mm${okS(r.wmax / r.limMax)}; w<sub>3</sub> = ${f(Math.max(0, r.w3), 1)} mm ≤ ${f(r.lim3, 1)} mm${okS(r.w3 / r.lim3)}`, 'PN-EN 1990 A1.4.3')); });
+  (sg.montaz || []).forEach(q => { h += line(`Etap ${q.etap + 1} (${esc(md.etapy[q.etap].nazwa)}): ugięcie charakterystyczne w = ${f(q.w, 1)} mm (x = ${f(q.x / 1000)} m) – informacyjnie`); });
+  if (sg.f1) h += mk('f1', eq('f_{1}', 'MES, masa z G + Σψ_{2}·Q', '', f(sg.f1, 2), 'Hz', 'PN-EN 1990 A1.4.4', [sg.f1 >= U.num(S.sgu.fmin, 3) ? 'ok' : 'fail', `${sg.f1 >= U.num(S.sgu.fmin, 3) ? '≥' : '<'} f<sub>min</sub> = ${f(U.num(S.sgu.fmin, 3), 1)} Hz`]));
+  // ---------------------------------------------------------- 9. podpory
   h += H2('Podpory, oparcia i połączenia (PN-EN 1993-1-5, PN-EN 1993-1-8)');
   (R.podpory || []).forEach(p => {
-    h += `<h3>Podpora ${esc(p.id)}${p.tymcz ? ' (tymczasowa)' : ''} – x = ${f(p.x / 1000)} m</h3>`;
-    h += `<div class="fig">${D.joint(sec, p.wezel || {})}</div>`;
-    h += eq(`R<sub>Ed,max</sub> = ${kN(p.Rmax)} kN; |M<sub>Ed</sub>| = ${kNm(p.Mmax)} kNm; reakcje charakterystyczne (etap ${p.eK + 1}): ${p.Rk.map(r => `${esc(r.id)}: ${kN(r.R)} kN`).join(', ')}`);
-    p.equ.forEach(e => { h += eq(`EQU, etap ${e.etap + 1}: R<sub>min</sub> = ${kN(e.Rmin)} kN ${e.Rmin < 0 ? '<span class="fail">– odrywanie: wymagane zakotwienie</span>' : '– docisk zapewniony'}`, 'PN-EN 1990 tabl. A1.2(A)'); });
-    if (p.patch) h += patchTxt(p.patch, `Docisk środnika nad podporą ${p.id}`);
-    if (p.zebro) { const z = p.zebro; h += eq(`Żebra podporowe 2 × ${f(z.bs, 0)} × ${f(z.ts, 0)} mm + środnik 2 × 15εt<sub>w</sub>: A<sub>s</sub> = ${f(z.As / 100)} cm², I<sub>s</sub> = ${f(z.Is / 1e4, 1)} cm⁴, i = ${f(z.i, 1)} mm, l = ${f(z.Lcr, 0)} mm, λ̄ = ${f(z.lam, 3)}, krzywa c: χ = ${f(z.chi, 3)}, N<sub>b,Rd</sub> = ${kN(z.NbRd)} kN ≥ ${kN(z.F)} kN ${okS(z.uB)}`, 'PN-EN 1993-1-5 9.4'); h += eq(`Docisk końców żeber: A<sub>c</sub> = ${f(z.Acont, 0)} mm², F<sub>Rd</sub> = ${kN(z.Fbear)} kN ${okS(z.uC)}`); }
-    if (p.plyta) p.plyta.checks.forEach(c => { h += eq(`${esc(c.n)}: ${esc(c.f)}; F<sub>Rd</sub> = ${kN(c.Rd)} kN ≥ R<sub>Ed</sub> = ${kN(c.Ed)} kN ${okS(c.u)}`, esc(c.ref)); });
+    h += `<h3>Podpora ${esc(p.id)}${p.tymcz ? ' (montażowa)' : ''} – x = ${f(p.x / 1000)} m</h3>`;
+    if (!p.tymcz && sec.kind !== 'L') h += `<div class="fig">${D.joint(sec, p.wezel || {}, { W: 360, H: 250 })}</div>`;
+    h += line(`R<sub>Ed,max</sub> = <b>${kN(p.Rmax)} kN</b>${p.Mmax > 1e3 ? `; |M<sub>Ed</sub>| = ${kNm(p.Mmax)} kNm` : ''}; reakcje charakterystyczne (etap ${p.eK + 1}): ${p.Rk.map(r => `${esc(r.id)}: ${kN(r.R)} kN`).join(', ')}`);
+    p.equ.forEach(e => { h += mk(`${p.id}-EQU`, line(`EQU, etap ${e.etap + 1}: R<sub>min</sub> = ${kN(e.Rmin)} kN ${e.Rmin < 0 ? '<span class="fail">– odrywanie: wymagane zakotwienie</span>' : '– docisk zapewniony'}`, 'PN-EN 1990 tabl. A1.2(A)')); });
+    if (p.patch) h += mk(`${p.id}-PL`, patchTxt(p.patch, `Docisk środnika nad podporą ${p.id}`));
+    if (p.zebro) { const z = p.zebro; h += mk(`${p.id}-ZB`, line(`Żebra podporowe ${f(z.bs, 0)} × ${f(z.ts, 0)} mm + pasmo środnika 15εt<sub>w</sub>: A<sub>s</sub> = ${f(z.As / 100)} cm², I<sub>s</sub> = ${f(z.Is / 1e4, 1)} cm⁴, i = ${f(z.i, 1)} mm, l = ${f(z.Lcr, 0)} mm, λ̄ = ${f(z.lam, 3)}, krzywa c: χ = ${f(z.chi, 3)}; N<sub>b,Rd</sub> = ${kN(z.NbRd)} kN ≥ R<sub>Ed</sub> = ${kN(z.F)} kN${okS(z.uB)}`, 'PN-EN 1993-1-5 9.4')) + mk(`${p.id}-ZD`, line(`Docisk końców żeber: A<sub>c</sub> = ${f(z.Acont, 0)} mm², F<sub>Rd</sub> = ${kN(z.Fbear)} kN${okS(z.uC)}`, '6.2.4')); }
+    if (p.plyta) p.plyta.checks.forEach((c, k) => { h += mk(`${p.id}-B${k}`, line(`${esc(c.n)}: ${esc(c.f || '')}; F<sub>Rd</sub> = ${kN(c.Rd)} kN ≥ R<sub>Ed</sub> = ${kN(c.Ed)} kN${okS(c.u)}`, c.ref)); });
     if (p.pol) {
       const w = p.pol;
-      h += `<p>${w.typ === 'blacha_czolowa' ? 'Krótka blacha czołowa' : 'Blacha żebrowa'}: śruby ${w.n} × ${esc(p.wezel.d)} kl. ${esc(p.wezel.kl)} (d<sub>0</sub> = ${w.bolt.d0} mm), blacha ${esc(mat.gatunek)} t<sub>p</sub> = ${f(U.num(p.wezel.tp), 0)} mm (f<sub>y</sub> = ${w.plate.fy}, f<sub>u</sub> = ${w.plate.fu} MPa); F<sub>v,Rd</sub> = ${kN(w.bolt.Fv)} kN/śrubę.</p>`;
-      h += tbl(['Sprawdzenie', 'Punkt normy', 'E<sub>d</sub>', 'R<sub>d</sub>', 'Wytężenie', 'Tok'], w.checks.map(c => [esc(c.n), esc(c.ref), c.Rd === 1 ? '' : (c.n.includes('V·z') ? kNm(c.Ed) + ' kNm' : c.n.includes('Spoiny blachy do podpory') ? f(c.Ed, 1) + ' N/mm' : kN(c.Ed) + ' kN'), c.Rd === 1 ? '' : (c.n.includes('V·z') ? kNm(c.Rd) + ' kNm' : c.n.includes('Spoiny blachy do podpory') ? f(c.Rd, 1) + ' N/mm' : kN(c.Rd) + ' kN'), (isFinite(c.u) ? Math.round(c.u * 100) + '%' : '∞') + ' ' + okS(c.u), `<span class="note">${esc(c.f || '')}</span>`]));
-      if (w.detal.length) h += `<p class="note">Rozmieszczenie łączników (tabl. 3.3): ${w.detal.map(d => `${esc(d.n)}: ${f(d.v, 0)} ${d.ok ? '≥' : '<'} ${f(d.lim, 1)} mm`).join('; ')}.</p>`;
-      w.uwagi.forEach(u => { h += `<p class="warn">${esc(u)}</p>`; });
+      h += line(`${w.typ === 'blacha_czolowa' ? 'Krótka blacha czołowa' : 'Blacha żebrowa'}: śruby ${w.n} × ${esc(p.wezel.d)} kl. ${esc(p.wezel.kl)} (d<sub>0</sub> = ${w.bolt.d0} mm), blacha ${esc(mat.gatunek)} t<sub>p</sub> = ${f(U.num(p.wezel.tp), 0)} mm (f<sub>y</sub> = ${w.plate.fy}, f<sub>u</sub> = ${w.plate.fu} MPa); F<sub>v,Rd</sub> = ${kN(w.bolt.Fv)} kN na śrubę`, 'PN-EN 1993-1-8 tabl. 3.4');
+      w.checks.forEach((c, k) => { const un = c.Rd === 1 ? '-' : (c.n.indexOf('V·z') >= 0 && c.n.indexOf('Spoiny') < 0 ? 'M' : c.n.indexOf('Spoiny blachy do podpory') >= 0 ? 'q' : 'F'); h += mk(`${p.id}-C${k}`, line(`${esc(c.n)}${c.f ? `: ${esc(c.f)}` : ''}${c.Rd === 1 ? ` → ${f(c.u, 3)}` : `; E<sub>d</sub> = ${V0(c.Ed, un)} ≤ R<sub>d</sub> = ${V0(c.Rd, un)}`}${okS(c.u)}`, c.ref)); });
+      if (w.detal.length) h += line(`Rozmieszczenie łączników: ${w.detal.map(d => `${esc(d.n)}: ${f(d.v, 0)} ${d.ok ? '≥' : '<'} ${f(d.lim, 1)} mm`).join('; ')}`, 'PN-EN 1993-1-8 tabl. 3.3');
+      w.uwagi.forEach(t => { h += `<p class="warn">${esc(t)}</p>`; });
     }
   });
-
-  // ---------------------------------------------------------- 9. pożar
+  // ---------------------------------------------------------- pożar, zmęczenie, kruche pękanie
   if (R.pozar && R.pozar.hist) {
     const fr = R.pozar;
     h += H2('Nośność w warunkach pożaru (PN-EN 1993-1-2)');
-    h += `<p>Wymagana odporność R${fr.Rreq}; pożar standardowy (PN-EN 1991-1-2, krzywa ISO 834); nagrzewanie ${S.pozar.ekspozycja === '3' ? 'z 3 stron (płyta na pasie górnym)' : 'z 4 stron'}; ${fr.prot ? `zabezpieczenie: ${S.pozar.ochrona === 'plyty' ? 'okładzina skrzynkowa' : 'natrysk konturowy'}, λ<sub>p</sub> = ${esc(String(S.pozar.lp))} W/mK, d<sub>p</sub> = ${esc(String(S.pozar.dp))} mm, c<sub>p</sub> = ${esc(String(S.pozar.cp))} J/kgK, ρ<sub>p</sub> = ${esc(String(S.pozar.rp))} kg/m³` : 'bez zabezpieczenia'}. Kombinacja: ${esc(fr.combo.opis)}.</p>`;
-    h += eq(`A<sub>m</sub>/V = ${f(fr.sf.AmV, 0)} m⁻¹ (kontur), [A<sub>m</sub>/V]<sub>b</sub> = ${f(fr.sf.AmVb, 0)} m⁻¹${fr.prot ? `, A<sub>p</sub>/V = ${f(fr.sf.ApV, 0)} m⁻¹` : `, k<sub>sh</sub> = 0,9·[A<sub>m</sub>/V]<sub>b</sub>/[A<sub>m</sub>/V] = ${f(fr.ksh, 3)}`}`, '4.2.5');
-    h += eq(`M<sub>fi,Ed</sub> = ${kNm(Math.abs(fr.Efi.M))} kNm, V<sub>fi,Ed</sub> = ${kN(fr.Efi.V)} kN; κ<sub>1</sub> = ${f(fr.kap.k1, 2)}, κ<sub>2</sub> = ${f(fr.kap.k2, 2)}; μ<sub>0</sub> = ${f(fr.mu0, 3)}`, '4.2.3.3');
-    h += eq(fr.cls4 ? 'Przekrój klasy 4 – temperatura krytyczna θ<sub>crit</sub> = 350 °C (zał. E)' : `θ<sub>a,cr</sub> = ${f(fr.thcr, 0)} °C (z warunku nośności M<sub>fi,θ,Rd</sub> = k<sub>y,θ</sub>·M<sub>Rd</sub>·γ<sub>M0</sub>/(γ<sub>M,fi</sub>·κ<sub>1</sub>·κ<sub>2</sub>), zwichrzenia χ<sub>LT,fi</sub> z λ̄<sub>LT,θ</sub> = λ̄<sub>LT</sub>√(k<sub>y,θ</sub>/k<sub>E,θ</sub>), α = 0,65√(235/f<sub>y</sub>) i ścinania); porównawczo wg (4.22): θ<sub>a,cr</sub> = ${f(fr.thcr424, 0)} °C`, '4.2.3.3, 4.2.3.4, 4.2.4');
+    h += `<p>Wymagana odporność R${fr.Rreq}; pożar standardowy ISO 834 (PN-EN 1991-1-2); nagrzewanie ${S.pozar.ekspozycja === '3' ? 'z 3 stron' : 'z 4 stron'}; ${fr.prot ? `zabezpieczenie ${S.pozar.ochrona === 'plyty' ? 'skrzynkowe' : 'konturowe'}: λ<sub>p</sub> = ${esc(String(S.pozar.lp))} W/mK, d<sub>p</sub> = ${esc(String(S.pozar.dp))} mm, c<sub>p</sub> = ${esc(String(S.pozar.cp))} J/kgK, ρ<sub>p</sub> = ${esc(String(S.pozar.rp))} kg/m³` : 'bez zabezpieczenia'}; kombinacja: ${esc(fr.combo.opis)}.</p>`;
+    h += line(`A<sub>m</sub>/V = ${f(fr.sf.AmV, 0)} m⁻¹, [A<sub>m</sub>/V]<sub>b</sub> = ${f(fr.sf.AmVb, 0)} m⁻¹${fr.prot ? `, A<sub>p</sub>/V = ${f(fr.sf.ApV, 0)} m⁻¹` : `, k<sub>sh</sub> = ${f(fr.ksh, 3)}`}`, '4.2.5');
+    h += line(`M<sub>fi,Ed</sub> = ${kNm(Math.abs(fr.Efi.M))} kNm, V<sub>fi,Ed</sub> = ${kN(fr.Efi.V)} kN; κ<sub>1</sub> = ${f(fr.kap.k1, 2)}, κ<sub>2</sub> = ${f(fr.kap.k2, 2)}; μ<sub>0</sub> = ${f(fr.mu0, 3)}`, '4.2.3.3');
+    h += line(fr.cls4 ? 'Przekrój klasy 4 – θ<sub>crit</sub> = 350 °C (zał. E)' : `θ<sub>a,cr</sub> = <b>${f(fr.thcr, 0)} °C</b> (z warunków nośności przy zginaniu, zwichrzeniu i ścinaniu w temperaturze θ); porównawczo wg (4.22): ${f(fr.thcr424, 0)} °C`, '4.2.3.3, 4.2.4');
     h += `<div class="fig">${D.fire(fr, { width: 640 })}</div>`;
-    h += eq(`czas osiągnięcia θ<sub>a,cr</sub>: t<sub>cr</sub> = ${fr.tcr === null ? `> ${f(fr.hist[fr.hist.length - 1][0], 0)}` : f(fr.tcr, 1)} min ${fr.ok ? '≥' : '<'} ${fr.Rreq} min ${fr.ok ? '<span class="ok">– warunek spełniony</span>' : '<span class="fail">– warunek NIE spełniony</span>'}; w ${fr.Rreq}. min θ<sub>a</sub> = ${f(fr.thR, 0)} °C, wytężenie ${f(fr.uR, 3)}`, '4.2.5.1/4.2.5.2');
+    h += mk('fi-t', line(`czas osiągnięcia θ<sub>a,cr</sub>: t<sub>cr</sub> = ${fr.tcr === null ? `> ${f(fr.hist[fr.hist.length - 1][0], 0)}` : f(fr.tcr, 1)} min ${fr.ok ? '≥' : '<'} ${fr.Rreq} min ${fr.ok ? '<span class="ok">✔ warunek spełniony</span>' : '<span class="fail">✖ warunek NIESPEŁNIONY</span>'}; w ${fr.Rreq}. minucie θ<sub>a</sub> = ${f(fr.thR, 0)} °C`, '4.2.5'));
   }
-
-  // ---------------------------------------------------------- 10. zmęczenie
   if (R.zm && R.zm.det) {
     const z = R.zm;
     h += H2('Zmęczenie (PN-EN 1993-1-9)');
-    h += `<p>Przypadki cykliczne: ${z.ids.map(esc).join(', ')}; współczynnik dynamiczny φ = ${esc(String(S.zmeczenie.phi))}${S.zmeczenie.zmiennyZnak ? ', obciążenie zmiennego znaku' : ''}; n = ${U.fmt(z.n, 0)} cykli; γ<sub>Ff</sub> = ${f(ndp.gFf)}, γ<sub>Mf</sub> = ${f(z.gMf)} (${S.zmeczenie.ocena === 'bezpieczna' ? 'bezpieczny okres użytkowania' : 'tolerancja uszkodzeń'}, ${S.zmeczenie.skutki === 'duze' ? 'duże' : 'małe'} skutki).</p>`;
-    z.det.forEach(d => { h += eq(`${esc(d.cat.n)} (${esc(d.miejsce)}): Δσ = ${f(d.ds, 1)} MPa (x = ${f(d.x / 1000)} m); Δσ<sub>C</sub>/γ<sub>Mf</sub> = ${f(d.dcd, 1)} MPa; N<sub>R</sub> = ${isFinite(d.Nf) ? U.fmt(d.Nf, 0) : '∞ (poniżej progu Δσ<sub>L</sub>)'}; D = n/N<sub>R</sub> = ${f(d.D, 4)} ≤ 1,0 ${okS(d.D)}`, 'rys. 7.1, 8(2)'); });
-    h += eq(`Δτ = ${f(z.tau.dt, 1)} MPa; Δτ<sub>C</sub> = ${f(z.tau.dtc, 0)} MPa (m = 5); D = ${f(z.tau.D, 4)} ${okS(z.tau.D)}`, 'rys. 7.2');
+    h += `<p>Przypadki cykliczne: ${z.ids.map(esc).join(', ')}; φ = ${esc(String(S.zmeczenie.phi))}${S.zmeczenie.zmiennyZnak ? ', obciążenie zmiennego znaku' : ''}; n = ${fm(z.n, 0)} cykli; γ<sub>Ff</sub> = ${f(ndp.gFf)}, γ<sub>Mf</sub> = ${f(z.gMf)}.</p>`;
+    z.det.forEach(d => { h += mk('fat', line(`${esc(d.cat.n)} (${esc(d.miejsce)}): Δσ = ${f(d.ds, 1)} MPa (x = ${f(d.x / 1000)} m); Δσ<sub>C</sub>/γ<sub>Mf</sub> = ${f(d.dcd, 1)} MPa; N<sub>R</sub> = ${isFinite(d.Nf) ? fm(d.Nf, 0) : '∞'}; D = ${f(d.D, 4)}${okS(d.D)}`, 'rys. 7.1, 8(2)')); });
+    h += mk('fatT', line(`Δτ = ${f(z.tau.dt, 1)} MPa; Δτ<sub>C</sub> = ${f(z.tau.dtc, 0)} MPa; D = ${f(z.tau.D, 4)}${okS(z.tau.D)}`, 'rys. 7.2'));
   }
-
-  // ---------------------------------------------------------- 11. kruche pękanie
   if (R.kr) {
     const k = R.kr;
     h += H2('Dobór stali ze względu na kruche pękanie (PN-EN 1993-1-10)');
-    h += eq(`T<sub>Ed</sub> = T<sub>md</sub> + ΔT<sub>r</sub> + ΔT<sub>σ</sub> + ΔT<sub>R</sub> + ΔT<sub>ε̇</sub> + ΔT<sub>εcf</sub> = ${f(U.num(S.kruche.Tmd), 0)} + ${f(U.num(S.kruche.dTr), 0)} + 0 + ${f(U.num(ndp.dTR), 0)} + ${f(U.num(S.kruche.dTeps), 0)} + ${f(U.num(S.kruche.dTcf), 0)} = ${f(k.TEd, 0)} °C`, '2.2(5), (2.2)');
-    h += `<p>σ<sub>Ed</sub> z kombinacji G + ψ<sub>1</sub>·Q<sub>k,1</sub> + Σψ<sub>2,i</sub>·Q<sub>k,i</sub> (2.6); f<sub>y</sub>(t) = f<sub>y,nom</sub> − 0,25·t (2.4); dopuszczalna grubość z tabl. 2.1 (interpolacja liniowa).</p>`;
-    h += tbl(['Element', 't [mm]', 'σ<sub>Ed</sub> [MPa]', 'f<sub>y</sub>(t) [MPa]', 'σ<sub>Ed</sub>/f<sub>y</sub>(t)', 't<sub>max</sub> [mm]', 'Wynik'], k.el.map(e => [esc(e.n), f(e.t, 1), e.s === null ? 'przyjęto' : f(e.s, 1), f(e.fyt, 1), f(e.ratio, 2), e.r.err ? esc(e.r.err) : f(e.r.t, 0), e.r.err ? '<span class="fail">poza tablicą</span>' : e.t <= e.r.t ? '<span class="ok">OK</span>' : '<span class="fail">NIE</span>']));
-    if (k.z) h += eq(`Klasa Z (rozdz. 3): Z<sub>Ed</sub> = Z<sub>a</sub> + Z<sub>b</sub> + Z<sub>c</sub> + Z<sub>d</sub> + Z<sub>e</sub> = ${k.z.Za} + ${k.z.Zb} + ${k.z.Zc} + ${k.z.Zd} + ${k.z.Ze} = ${k.z.ZEd} → ${esc(k.z.cls)}`, 'tabl. 3.1, 3.2');
+    h += eq('T_{Ed}', 'T_{md} + ΔT_{r} + ΔT_{σ} + ΔT_{R} + ΔT_{ε̇} + ΔT_{εcf}', `${f(U.num(S.kruche.Tmd), 0)} + ${f(U.num(S.kruche.dTr), 0)} + 0 + ${f(U.num(ndp.dTR), 0)} + ${f(U.num(S.kruche.dTeps), 0)} + ${f(U.num(S.kruche.dTcf), 0)}`, f(k.TEd, 0), '°C', '2.2(5)');
+    h += mk('kr', k.el.map(e => line(`${esc(e.n)}: t = ${f(e.t, 1)} mm, σ<sub>Ed</sub> = ${e.s === null ? 'przyjęto' : f(e.s, 1) + ' MPa'}, σ<sub>Ed</sub>/f<sub>y</sub>(t) = ${f(e.ratio, 2)} → t<sub>max</sub> = ${e.r.err ? esc(e.r.err) : f(e.r.t, 0) + ' mm'} ${e.r.err ? '<span class="fail">poza tablicą</span>' : e.t <= e.r.t ? '<span class="ok">✔</span>' : '<span class="fail">✖</span>'}`, 'tabl. 2.1')).join(''));
+    if (k.z) h += mk('krZ', line(`Klasa Z: Z<sub>Ed</sub> = Z<sub>a</sub> + Z<sub>b</sub> + Z<sub>c</sub> + Z<sub>d</sub> + Z<sub>e</sub> = ${k.z.Za} + ${k.z.Zb} + ${k.z.Zc} + ${k.z.Zd} + ${k.z.Ze} = ${k.z.ZEd} → ${esc(k.z.cls)}`, 'tabl. 3.1, 3.2'));
   }
-
-  // ---------------------------------------------------------- 12. wykonanie
+  // ---------------------------------------------------------- wykonanie
   h += H2('Wymagania wykonawcze (PN-EN 1090-2)');
-  h += `<p><b>Klasa wykonania: ${R.exc.exc}</b> – ${R.exc.why.map(esc).join('; ')}.</p>`;
-  h += tbl(['Zakres', 'Wymaganie'], R.exc.req.map(r => [esc(r[0]), esc(r[1])]));
+  h += line(`<b>Klasa wykonania ${R.exc.exc}</b> – ${R.exc.why.map(esc).join('; ')}`, 'PN-EN 1993-1-1 zał. C');
+  h += R.exc.req.map(r => line(`${esc(r[0])}: ${esc(r[1])}`)).join('');
+  h += line(`Ochrona przed korozją: kategoria ${esc(S.wykonanie.korozja)}, trwałość ${esc(S.wykonanie.trwalosc)} (PN-EN ISO 12944)`);
   if (S.wykonanie.uwagi) h += `<p>${esc(S.wykonanie.uwagi)}</p>`;
-  h += '<p class="note">Wymagania należy przenieść do specyfikacji wykonania (PN-EN 1090-2, 4.1) i rysunków warsztatowych; tolerancje – zasadnicze wg zał. B oraz funkcjonalne wg klasy tolerancji ustalonej w specyfikacji.</p>';
-
-  // ---------------------------------------------------------- 13. zestawienie
-  h += H2('Zestawienie wyników');
-  h += tbl(['Grupa', 'Sprawdzenie', 'Punkt normy', 'E<sub>d</sub>', 'R<sub>d</sub>', 'Wytężenie', 'Wynik'], R.checks.map(c => [esc(c.grp), esc(c.n), esc(c.ref || ''), c.unit === '-' && c.Rd === 1 ? '' : esc(V0(c.Ed, c.unit)), c.unit === '-' && c.Rd === 1 ? '' : esc(V0(c.Rd, c.unit)), ubT(c), stT(c)]));
-  if (R.warnings.length) h += '<h3>Ostrzeżenia</h3>' + R.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('');
+  // ---------------------------------------------------------- belka i zestawienie
+  h += H2('Belka – widok i zestawienie materiałów');
+  h += `<p class="note">Rysunek poglądowy (skala pionowa powiększona).</p><div class="fig">${D.elevation(S, R, { W: 940 })}</div>`;
+  const to = RP.takeoff(S, R);
+  h += to.rows.map(r => line(`Poz. ${r.poz} – ${esc(r.n)}: ${r.szt} szt., ${esc(r.wym)}, ${esc(r.mat)} → ${f(r.m, 1)} kg`)).join('');
+  h += line(`<b>Razem stal ${f(to.total, 1)} kg</b>${Object.keys(to.bolts).length ? `; śruby: ${Object.keys(to.bolts).map(k => `${to.bolts[k]} × ${esc(k)}`).join(', ')}` : ''}${to.weld ? `; spoiny pachwinowe ok. ${f(to.weld / 1000, 2)} m` : ''}`);
+  // ---------------------------------------------------------- zestawienie sprawdzeń
+  h += H2('Zestawienie sprawdzeń');
+  const ticks = S.meta.ticks || {}, anyT = R.checks.some(c => ticks[c.id]);
+  const list = anyT ? R.checks.filter(c => ticks[c.id]) : R.checks;
+  if (!anyT) h += '<p class="note">Wszystkie sprawdzenia (w zakładce Podsumowanie można odhaczyć sprawdzenia przedstawiane w raporcie).</p>';
+  let grp = '';
+  list.forEach(c => {
+    if (c.grp !== grp) { grp = c.grp; h += `<h3>${esc(grp)}</h3>`; }
+    const cond = c.Rd === null || c.Rd === undefined ? V0(c.Ed, c.unit) : c.unit === '-' && c.Rd === 1 ? `${f(c.Ed, 3)} ≤ 1,0` : `${V0(c.Ed, c.unit)} ${c.inverse ? '≥' : '≤'} ${V0(c.Rd, c.unit)}`;
+    h += line(`${esc(c.n)}: ${cond}${c.util !== null && c.util !== undefined && !c.info ? `, η = ${isFinite(c.util) ? f(c.util * 100, 0) + '%' : '∞'}` : ''} – <span class="${c.info ? 'info' : c.status}">${c.info ? 'informacyjnie' : c.status === 'ok' ? 'spełniony' : c.status === 'warn' ? 'uwaga' : 'NIE spełniony'}</span>`, c.ref);
+  });
+  const fl = list.filter(c => c.status === 'fail').length, mx = Math.max(0, ...list.filter(c => !c.info && c.util !== null && isFinite(c.util)).map(c => c.util));
+  h += `<p class="verdict"><span class="${fl || R.errors.length ? 'fail' : 'ok'}">${fl ? `✖ Spośród przedstawionych sprawdzeń niespełnione: ${fl}.` : `✔ Przedstawione warunki normowe są spełnione. Maksymalne wykorzystanie η = ${f(mx * 100, 0)}%.`}</span></p>`;
+  if (R.warnings.length) h += R.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('');
   if (R.info.length) h += R.info.map(w => `<p class="note">${esc(w)}</p>`).join('');
-  h += `<div class="verdict ${vOk ? 'ok' : 'fail'}">${vOk ? 'Belka spełnia wymagania PN-EN w zakresie objętym obliczeniami.' : 'Belka NIE spełnia wszystkich wymagań – patrz pozycje oznaczone „NIE”.'}</div>`;
-
-  // ---------------------------------------------------------- 14. ograniczenia
-  h += H2('Założenia i ograniczenia modelu');
-  h += `<ul><li>Belka pryzmatyczna o przekroju dwuteowym (walcowanym lub spawanym, bi- lub monosymetrycznym); obciążenia w płaszczyźnie środnika (z) i poziome (y) bez mimośrodu względem środka ścinania – skręcanie od mimośrodu obciążeń nie jest analizowane.</li><li>Analiza sprężysta I rzędu; imperfekcje elementu ujęte przez krzywe wyboczeniowe i zwichrzeniowe; odkształcalność postaciowa pominięta.</li><li>Zwichrzenie: α<sub>cr</sub> dla całej belki (bezpieczne przypisanie do segmentów); stężenia traktowane jako sztywne – ich nośność i sztywność należy sprawdzić odrębnie (PN-EN 1993-1-1, 5.3.3).</li><li>Połączenia: przegubowe (krótka blacha czołowa, blacha żebrowa) na reakcję pionową; połączenia momentowe – poza zakresem.</li><li>Pożar: metody uproszczone, rozkład temperatury równomierny; zmęczenie: obciążenia stacjonarne o stałej amplitudzie.</li><li>Wartości NDP oznaczone „do potwierdzenia z ZK” oraz oznaczenia dokumentów niezweryfikowane w katalogu PKN wymagają potwierdzenia przez projektanta.</li></ul>`;
-
-  // ---------------------------------------------------------- 15. odtwarzalność
-  h += H2('Odtwarzalność obliczeń');
-  h += `<p>Program: ${BS.APP} ${BS.VERSION}; silnik: ${esc(BS.ENGINE)}; format danych: ${esc(BS.FORMAT)}; czas obliczeń: ${R.time} ms.</p>`;
-  h += `<p>Suma kontrolna SHA-256 danych wejściowych (kanoniczny JSON – klucze sortowane): <span class="mono">${R.hash}</span></p>`;
-  h += '<p class="note">Aby odtworzyć obliczenia: otwórz w programie plik projektu (.belkastal) lub plik HTML tego raportu (zawiera pełne dane); sprawdź zgodność sumy kontrolnej i wersji silnika. Ta sama wersja silnika i te same dane dają identyczne wyniki.</p>';
-  h += `<h3>Załącznik A – dane wejściowe projektu (JSON)</h3><pre class="mono" style="white-space:pre-wrap;font-size:9px;line-height:1.25">${esc(JSON.stringify(S))}</pre>`;
+  // ---------------------------------------------------------- odtwarzalność
+  h += H2('Założenia modelu i odtwarzalność');
+  h += `<p class="note">Belka pryzmatyczna; analiza sprężysta I rzędu (MES), imperfekcje ujęte krzywymi wyboczeniowymi i zwichrzeniowymi; obciążenia bez mimośrodu względem środka ścinania (skręcanie od mimośrodu nie jest analizowane); stężenia sztywne – ich nośność należy sprawdzić odrębnie; połączenia przegubowe na reakcję pionową.</p>`;
+  h += line(`Program ${BS.APP} ${BS.VERSION}; silnik ${esc(BS.ENGINE)}; format danych ${esc(BS.FORMAT)}; suma kontrolna SHA-256 danych: <span class="mono">${R.hash}</span>`);
+  if (opt.data !== false) h += `<p class="note">Plik HTML raportu zawiera pełne dane projektu – można go otworzyć w programie (Otwórz), aby odtworzyć obliczenia.</p>`;
   return h;
 };
-function V0(v, unit) { return BS.V ? BS.V.unitFmt(v, unit).replace(/<[^>]+>/g, '') : String(v); }
 
-function patchTxt(p, title) {
-  if (!p) return '';
-  let h = `<p><b>${esc(title)}</b> – typ ${p.typ === 'c' ? 'c (przy końcu belki)' : 'a (siła przez pas, opór obu stron środnika)'}</p>`;
-  h += eq(`m<sub>1</sub> = f<sub>yf</sub>b<sub>f</sub>/(f<sub>yw</sub>t<sub>w</sub>) = ${f(p.m1, 2)}; m<sub>2</sub> = ${f(p.m2, 2)}; k<sub>F</sub> = ${f(p.kF, 3)}; s<sub>s</sub> = ${f(p.ss, 0)} mm${p.typ === 'c' ? `, c = ${f(p.c, 0)} mm, l<sub>e</sub> = ${f(p.le, 1)} mm` : ''}; l<sub>y</sub> = ${f(p.ly, 1)} mm`, '6.3–6.5');
-  h += eq(`F<sub>cr</sub> = 0,9·k<sub>F</sub>·E·t<sub>w</sub>³/h<sub>w</sub> = ${kN(p.Fcr)} kN; λ̄<sub>F</sub> = √(l<sub>y</sub>t<sub>w</sub>f<sub>yw</sub>/F<sub>cr</sub>) = ${f(p.lF, 3)}; χ<sub>F</sub> = 0,5/λ̄<sub>F</sub> ≤ 1 = ${f(p.chi, 3)}; L<sub>eff</sub> = ${f(p.Leff, 1)} mm`, '6.4');
-  h += eq(`F<sub>Rd</sub> = f<sub>yw</sub>·L<sub>eff</sub>·t<sub>w</sub>/γ<sub>M1</sub> = ${kN(p.FRd)} kN; η<sub>2</sub> = F<sub>Ed</sub>/F<sub>Rd</sub> = ${kN(p.F)}/${kN(p.FRd)} = ${f(p.u, 3)} ${okS(p.u)}`, '6.1, 6.14');
+/* ---------------------------------------------------------- część statyczna (raport pełny i „Statyka”) */
+function staticPart(S, R, H2, full) {
+  const md = R.md, an = R.an, ndp = R.ndp, nE = md.nE;
+  let h = H2('Schemat statyczny i obciążenia');
+  for (let s = 0; s < nE; s++) h += `<div class="fig">${D.scheme(S, R, { W: 900, etap: s, dims: true })}</div>${nE > 1 ? `<p class="note">Etap ${s + 1}: ${esc(md.etapy[s].nazwa)} – podpory: ${md.systems[s].map(p => p.id).join(', ')}${md.stez.filter(z => z.od <= s).length ? `; stężenia: ${md.stez.filter(z => z.od <= s).map(z => `x = ${f(z.x / 1000)} m`).join(', ')}` : ''}${md.ciagle.pasG && U.num(md.ciagle.odEtapu) <= s ? '; pas górny stężony ciągle' : ''}</p>` : ''}`;
+  h += '<h3>Oddziaływania (wartości charakterystyczne)</h3>';
+  if (S.ciezarWlasny.auto !== false) h += line(`G₀ – ciężar własny belki: g<sub>k</sub> = ${f(R.sec.gk, 3)} kN/m × (1 + ${f(U.num(S.ciezarWlasny.dodatek), 0)}% na połączenia) = ${f(R.sec.gk * (1 + U.num(S.ciezarWlasny.dodatek) / 100), 3)} kN/m (stałe)`);
+  md.cases.filter(c => c.id !== 'G0').forEach(c => {
+    const ps = S0.RODZAJE[c.rodzaj].stale || c.rodzaj === 'A' ? '' : `; ψ<sub>0</sub>/ψ<sub>1</sub>/ψ<sub>2</sub> = ${K.psi(c).map(v => f(v, 1)).join(' / ')}`;
+    h += line(`<b>${esc(c.id)}</b> – ${esc(c.nazwa)} (${esc(S0.RODZAJE[c.rodzaj].n)}${c.rodzaj === 'Q' ? ', ' + esc((N.PSI[c.kat] || {}).n || c.kat) : ''}${nE > 1 ? `, etap ${c.etap + 1}` : ''}${!S0.RODZAJE[c.rodzaj].stale && c.uklad === 'szachownica' ? ', niekorzystnie w przęsłach' : ''}${c.wyklucz ? `, grupa „${esc(c.wyklucz)}”` : ''}${ps}): ` + c.parts.map(p => p.typ === 'q' ? `q = ${f(p.q0)}${p.q1 !== p.q0 ? '…' + f(p.q1) : ''} kN/m na x = ${f(p.x0 / 1000)}–${f(p.x1 / 1000)} m, ${p.kier === 'y' ? 'poziomo' : WYS[p.wys]}` : p.typ === 'P' ? `P = ${f(p.P / 1000)} kN w x = ${f(p.x / 1000)} m, ${p.kier === 'y' ? 'poziomo' : WYS[p.wys]}${p.ss ? `, s<sub>s</sub> = ${f(p.ss, 0)} mm` : ''}` : `M = ${f(p.M / 1e6)} kNm w x = ${f(p.x / 1000)} m`).join('; ') + (c.Nn ? `; N = ${f(c.Nn / 1000)} kN` : ''));
+  });
+  const off = (S.obciazenia || []).filter(o => o.aktywne === false);
+  if (off.length) h += `<p class="note">Pominięte w obliczeniach (wyłączone): ${off.map(o => esc(o.id)).join(', ')}.</p>`;
+  h += '<h3>Kombinacje oddziaływań (PN-EN 1990)</h3>';
+  const gS = ndp.gG_sup * ndp.KFI;
+  h += ndp.komb === '6.10' ? line(`E<sub>d</sub> = Σ γ<sub>G,j</sub>·G<sub>k,j</sub> + γ<sub>Q,1</sub>·Q<sub>k,1</sub> + Σ γ<sub>Q,i</sub>·ψ<sub>0,i</sub>·Q<sub>k,i</sub>; γ<sub>G,sup</sub> = ${f(gS)}, γ<sub>G,inf</sub> = ${f(ndp.gG_inf)}, γ<sub>Q</sub> = ${f(ndp.gQ * ndp.KFI)}`, '6.10')
+    : line(`mniej korzystna z: Σ γ<sub>G,j</sub>·G<sub>k,j</sub> + γ<sub>Q,1</sub>·ψ<sub>0,1</sub>·Q<sub>k,1</sub> + Σ γ<sub>Q,i</sub>·ψ<sub>0,i</sub>·Q<sub>k,i</sub> oraz Σ ξ·γ<sub>G,j</sub>·G<sub>k,j</sub> + γ<sub>Q,1</sub>·Q<sub>k,1</sub> + Σ γ<sub>Q,i</sub>·ψ<sub>0,i</sub>·Q<sub>k,i</sub>; γ<sub>G,sup</sub> = ${f(gS)}, γ<sub>G,inf</sub> = ${f(ndp.gG_inf)}, γ<sub>Q</sub> = ${f(ndp.gQ * ndp.KFI)}, ξ = ${f(ndp.xi)}`, '6.10a, 6.10b');
+  h += line('SGU: charakterystyczna G + Q<sub>k,1</sub> + Σψ<sub>0,i</sub>Q<sub>k,i</sub>; częsta G + ψ<sub>1,1</sub>Q<sub>k,1</sub> + Σψ<sub>2,i</sub>Q<sub>k,i</sub>; quasi-stała G + Σψ<sub>2,i</sub>Q<sub>k,i</sub>', '6.14b–6.16b');
+  if (full) h += line(`EQU: γ<sub>G,sup</sub> = ${f(ndp.gG_sup_equ)}, γ<sub>G,inf</sub> = ${f(ndp.gG_inf_equ)}, γ<sub>Q</sub> = ${f(ndp.gQ_equ)}`, 'tabl. A1.2(A)');
+  const cnt = {}; R.combos.forEach(c => { cnt[c.typ] = (cnt[c.typ] || 0) + 1; });
+  h += `<p class="note">Liczba kombinacji: ${Object.keys(cnt).map(t => `${({ SGN: 'SGN', char: 'charakterystyczne', czest: 'częste', qp: 'quasi-stałe', kruche: 'do doboru stali', poz: 'pożarowe', wyj: 'wyjątkowe' })[t] || t} ${cnt[t]}`).join(', ')}; obciążenia zmienne – każde jako wiodące; układy w przęsłach: ${K.patterns(md).map(p => esc(p.n)).join('; ')}.</p>`;
+  h += H2('Siły wewnętrzne, reakcje i ugięcia');
+  h += `<p>Analiza sprężysta I rzędu metodą elementów skończonych (${md.xs.length - 1} elementów), osobno w płaszczyźnie pionowej (I<sub>y</sub>) i poziomej (I<sub>z</sub>); kombinacje – superpozycja przypadków z historią etapów.</p>`;
+  for (let s = 0; s < nE; s++) {
+    const ev = R.env[s], ch = RP.charts(S, R, s, 900);
+    if (nE > 1) h += `<h3>Etap ${s + 1}: ${esc(md.etapy[s].nazwa)}</h3>`;
+    const strip = (o) => full ? o : Object.assign({}, o, { hseg: (o.kind === 'w' ? o.hseg : []), hl: [] });
+    h += `<div class="fig">${D.lineChart(strip(ch.M))}${ch.Mz ? D.lineChart(strip(ch.Mz)) : ''}${D.lineChart(strip(ch.V))}${ch.N ? D.lineChart(strip(ch.N)) : ''}${D.lineChart(strip(ch.w))}</div>`;
+    let iM = 0, im = 0; ev.Mmax.forEach((v, i) => { if (v > ev.Mmax[iM]) iM = i; }); ev.Mmin.forEach((v, i) => { if (v < ev.Mmin[im]) im = i; });
+    const vA = Math.max(...Array.from(ev.Vmax).map(Math.abs), ...Array.from(ev.Vmin).map(Math.abs));
+    h += line(`Ekstrema (obwiednia SGN): M<sub>Ed,max</sub> = <b>${kNm(ev.Mmax[iM])} kNm</b> (x = ${f(an.xs[iM] / 1000)} m)${ev.Mmin[im] < -1e3 ? `, M<sub>Ed,min</sub> = <b>${kNm(ev.Mmin[im])} kNm</b> (x = ${f(an.xs[im] / 1000)} m)` : ''}; |V<sub>Ed</sub>|<sub>max</sub> = <b>${kN(vA)} kN</b>; ugięcie charakterystyczne max ${f(Math.max(...ev.wmax), 1)} mm`);
+    h += `<div class="fig">${D.reactions(S, R, s, 900)}</div>`;
+    h += md.systems[s].map(p => { const r = ev.R[p.id] || {}; return line(`Podpora ${p.id}: R<sub>Ed,max</sub> = <b>${kN(r.max || 0)} kN</b>, R<sub>Ed,min</sub> = ${kN(r.min || 0)} kN${r.Mmax > 1e3 ? `, |M<sub>Ed</sub>| = ${kNm(r.Mmax)} kNm` : ''}; charakterystyczne: ${Object.keys(an.res[s]).map(k => { const q = an.res[s][k].tot.R[p.id]; return q ? `${esc(an.res[s][k].c.id)} ${kN(q.R)}` : ''; }).filter(Boolean).join(', ')} kN`); }).join('');
+  }
   return h;
 }
 
-/* pełny, samodzielny dokument HTML raportu (z osadzonymi danymi) */
-RP.document = function (S, R) {
-  const css = (document.getElementById('appcss') || {}).textContent || '';
+/* raport „Statyka”: dane, schemat, obciążenia, wykresy, reakcje */
+RP.buildStatic = function (S, R) {
+  const md = R.md, sec = R.sec, mat = R.mat;
+  let h = '', sn = 0; const H2 = (t) => `<h2>${++sn}. ${t}</h2>`;
+  h += `<h1>Statyka belki stalowej – ${esc(S.meta.nazwa)}</h1>`;
+  h += H2('Dane materiałowe');
+  h += line(`Stal ${esc(mat.gatunek)}${esc(mat.podgatunek)}: f<sub>y</sub> = ${mat.fy} MPa, f<sub>u</sub> = ${mat.fu} MPa, E = 210 000 MPa, G = 81 000 MPa; ciężar 78,5 kN/m³`, 'PN-EN 1993-1-1 tabl. 3.1');
+  h += H2('Przekrój');
+  h += `<div class="fig">${D.section(sec, { size: 220 })}</div>` + line(`${esc(sec.nazwa)}: A = ${f(sec.A / 100)} cm², I<sub>y</sub> = ${f(sec.Iy / 1e4, 0)} cm⁴, I<sub>z</sub> = ${f(sec.Iz / 1e4, 1)} cm⁴; masa ${f(sec.masa, 1)} kg/m`);
+  h += H2('Schemat statyczny');
+  h += line(`Długość belki L = ${f(md.L / 1000)} m; ${md.seg.map(q => `${esc(q.n)} ${f((q.x1 - q.x0) / 1000)} m`).join('; ')}`);
+  h += md.sup.map((p, i) => line(`Podpora <b>${p.id}</b>: x = ${f(p.x / 1000)} m; ${SUPN[p.typ] || p.typ}${p.przesuwna ? ' przesuwna' : ''}`)).join('') + md.tmp.map(t => line(`Podpora montażowa <b>${t.id}</b>: x = ${f(t.x / 1000)} m, usuwana po etapie ${t.do + 1}`)).join('');
+  h += staticPart(S, R, H2, false).replace(/<h2>\d+\. Schemat statyczny i obciążenia<\/h2>/, '<h2>' + (++sn) + '. Obciążenia</h2>').replace(/<h2>\d+\. Siły wewnętrzne, reakcje i ugięcia<\/h2>/, '<h2>' + (++sn) + '. Wykresy sił wewnętrznych i reakcje podporowe</h2>');
+  return h;
+};
+
+/* ---------------------------------------------------------- treści sprawdzeń (raport i „jak obliczono”) */
+function checkSec(c, R) {
+  const sec = R.sec, b = R.base, mat = R.mat, ndp = R.ndp, d = c.d || {};
+  let h = '';
+  if (/-M$/.test(c.id)) {
+    const p = d.p || {};
+    h += `<p><b>${esc(c.n)}</b> – x = ${f(c.x / 1000)} m; ${esc(c.combo)}</p>`;
+    h += line(`M<sub>Ed</sub> = ${kNm(Math.abs(d.M))} kNm${Math.abs(d.N) > 1 ? `, N<sub>Ed</sub> = ${kN(d.N)} kN` : ''}${Math.abs(d.Mz) > 1 ? `, M<sub>z,Ed</sub> = ${kNm(Math.abs(d.Mz))} kNm` : ''}, V<sub>Ed</sub> = ${kN(Math.abs(d.V))} kN`);
+    const W = p.cls <= 2 ? sec.Wpl_y : p.cls === 3 ? Math.min(sec.Wel_t, sec.Wel_b) : ((d.M >= 0 ? b.effPos : b.effNeg) || {}).Weff;
+    h += eq('M_{c,Rd}', 'W·f_{y}/γ_{M0}', `${f(W / 1e3, 1)}·10³·${mat.fy}/${f(ndp.gM0)}`, kNm(W * mat.fy / ndp.gM0), `kNm (W = ${p.cls <= 2 ? 'W<sub>pl,y</sub>' : p.cls === 3 ? 'W<sub>el,min</sub>' : 'W<sub>eff,min</sub>'}, klasa ${p.cls})`, '6.13–6.15');
+    if (p.rho > 0) h += eq('ρ', '(2V_{Ed}/V_{pl,Rd} − 1)²', '', f(p.rho, 4), `→ M<sub>V,Rd</sub> = ${kNm(p.McRd)} kNm`, '6.2.8');
+    if (p.MN && Math.abs(d.N) > 1) h += eq('M_{N,Rd}', '', '', kNm(p.MN), 'kNm', '6.2.9.1');
+    h += line(`${p.f === '6.41' ? '(M<sub>y,Ed</sub>/M<sub>N,y,Rd</sub>)<sup>α</sup> + (M<sub>z,Ed</sub>/M<sub>N,z,Rd</sub>)<sup>β</sup>' : p.cls >= 3 && (Math.abs(d.N) > 1 || Math.abs(d.Mz) > 1) ? 'σ<sub>x,Ed</sub>/(f<sub>y</sub>/γ<sub>M0</sub>)' : `M<sub>Ed</sub>/M<sub>${Math.abs(d.N) > 1 && p.cls <= 2 ? 'N' : 'c'},Rd</sub>`} = <b>${f(c.util, 3)}</b> ≤ 1,0${okS(c.util)}`, p.f);
+  } else if (/-V$/.test(c.id)) {
+    h += `<p><b>${esc(c.n)}</b> – x = ${f(c.x / 1000)} m; ${esc(c.combo)}</p>`;
+    h += eq('V_{pl,Rd}', 'A_{v}·f_{y}/(√3·γ_{M0})', `${f(b.Av, 0)}·${mat.fy}/(√3·${f(ndp.gM0)})`, kN(b.Vpl), 'kN', '6.18');
+    h += line(`V<sub>Ed</sub>/V<sub>pl,Rd</sub> = ${kN(c.Ed)}/${kN(c.Rd)} = <b>${f(c.util, 3)}</b> ≤ 1,0${okS(c.util)}`, '6.17');
+  } else h += line(`<b>${esc(c.n)}</b>${c.x !== undefined ? ` (x = ${f(c.x / 1000)} m)` : ''}: ${V0(c.Ed, c.unit)} / ${V0(c.Rd, c.unit)} = <b>${f(c.util, 3)}</b>${okS(c.util)}`, c.ref);
+  return h;
+}
+function ltbTxt(g, mat, ndp) {
+  const l = g.ltb;
+  let h = `<p><b>Segment ${f(g.sg.x0 / 1000)}–${f(g.sg.x1 / 1000)} m</b>${g.sg.free ? ' (wspornik)' : ''} – ${esc(g.combo.opis)}</p>`;
+  h += line(`|M<sub>Ed,max</sub>| = ${kNm(g.sh.mabs)} kNm (${g.Mpos ? 'ściskany pas górny' : 'ściskany pas dolny'}); M<sub>cr</sub> = ${g.Mcr === Infinity ? '∞' : `α<sub>cr</sub>·|M<sub>Ed,max</sub>| = ${f(g.alphaCr, 3)}·${kNm(g.sh.mabs)} = <b>${kNm(g.Mcr)} kNm</b>`}`);
+  h += eq('λ̄_{LT}', '√(W_{y}·f_{y}/M_{cr})', `√(${f(g.Wy / 1e3, 1)}·10³·${mat.fy}/${g.Mcr === Infinity ? '∞' : f(g.Mcr, 0)})`, f(g.lam, 3), `(klasa ${g.cls})`, '6.56');
+  if (l.skip) h += line(`λ̄<sub>LT</sub> ≤ λ̄<sub>LT,0</sub> = ${f(l.lam0, 2)} lub M<sub>Ed</sub>/M<sub>cr</sub> ≤ λ̄<sub>LT,0</sub>² → χ<sub>LT</sub> = 1,0 (zwichrzenie można pominąć)`, '6.3.2.2(4)');
+  else {
+    h += eq('Φ_{LT}', `0,5[1 + α_{LT}(λ̄_{LT} − ${f(l.lam0, 2)}) + ${l.met === '6.3.2.3' ? f(l.beta, 2) + '·' : ''}λ̄_{LT}²]`, `krzywa ${l.curve}, α<sub>LT</sub> = ${f(l.alLT, 2)}`, f(l.phi, 3), '', l.met === '6.3.2.3' ? '6.57' : '6.56') + eq('χ_{LT}', '', '', f(l.chi, 3), '');
+    if (l.met === '6.3.2.3') h += eq('f', '1 − 0,5(1 − k_{c})[1 − 2(λ̄_{LT} − 0,8)²]', `k<sub>c</sub> = ${f(l.kc, 3)} (${esc(l.kcSrc || '')})`, f(l.f, 3), `→ χ<sub>LT,mod</sub> = ${f(l.chimod, 3)}`, '6.58, tabl. 6.6');
+  }
+  h += eq('M_{b,Rd}', `χ_{LT${l.met === '6.3.2.3' ? ',mod' : ''}}·W_{y}·f_{y}/γ_{M1}`, '', kNm(g.Mb), 'kNm', '6.55') + line(`M<sub>Ed</sub>/M<sub>b,Rd</sub> = ${kNm(g.sh.mabs)}/${kNm(g.Mb)} = <b>${f(g.u, 3)}</b> ≤ 1,0${okS(g.u)}`, '6.54');
+  return h;
+}
+function interTxt(it) {
+  let h = `<p><b>Interakcja – segment ${f(it.sg.x0 / 1000)}–${f(it.sg.x1 / 1000)} m</b> (${esc(it.combo.opis)})</p>`;
+  h += line(`N<sub>Ed</sub> = ${kN(it.Nc)} kN, M<sub>y,Ed</sub> = ${kNm(it.My)} kNm, M<sub>z,Ed</sub> = ${kNm(it.Mz)} kNm; L<sub>cr,y</sub> = ${f(it.Lcy / 1000)} m, L<sub>cr,z</sub> = ${f(it.Lcz / 1000)} m; λ̄<sub>y</sub> = ${f(it.ly, 3)}, λ̄<sub>z</sub> = ${f(it.lz, 3)}, λ̄<sub>T</sub> = ${f(it.lT, 3)}; χ<sub>y</sub> = ${f(it.chiy, 3)} (krzywa ${it.curves.y}), χ<sub>z</sub> = ${f(it.chiz, 3)}, χ<sub>T</sub> = ${f(it.chiT, 3)} (krzywa ${it.curves.z}); χ<sub>LT</sub> = ${f(it.chiLT, 3)}`, '6.3.1');
+  h += line(`C<sub>my</sub> = ${f(it.Cmy, 3)}, C<sub>mz</sub> = ${f(it.Cmz, 3)}, C<sub>mLT</sub> = ${f(it.CmLT, 3)}; k<sub>yy</sub> = ${f(it.kyy, 3)}, k<sub>yz</sub> = ${f(it.kyz, 3)}, k<sub>zy</sub> = ${f(it.kzy, 3)}, k<sub>zz</sub> = ${f(it.kzz, 3)}`, 'zał. B');
+  h += line(`(6.61): <b>${f(it.u61, 3)}</b> ≤ 1,0${okS(it.u61)}; (6.62): <b>${f(it.u62, 3)}</b> ≤ 1,0${okS(it.u62)}`, '6.3.3');
+  return h;
+}
+function patchTxt(p, title) {
+  if (!p) return '';
+  let h = `<p><b>${esc(title)}</b> – typ ${p.typ === 'c' ? 'c (przy końcu belki)' : 'a (siła przez pas)'}</p>`;
+  h += line(`m<sub>1</sub> = ${f(p.m1, 2)}; m<sub>2</sub> = ${f(p.m2, 2)}; k<sub>F</sub> = ${f(p.kF, 3)}; s<sub>s</sub> = ${f(p.ss, 0)} mm${p.typ === 'c' ? `, c = ${f(p.c, 0)} mm, l<sub>e</sub> = ${f(p.le, 1)} mm` : ''}; l<sub>y</sub> = ${f(p.ly, 1)} mm`, 'PN-EN 1993-1-5 6.5');
+  h += eq('F_{cr}', '0,9·k_{F}·E·t_{w}³/h_{w}', '', kN(p.Fcr), 'kN', '6.5') + eq('λ̄_{F}', '√(l_{y}·t_{w}·f_{yw}/F_{cr})', '', f(p.lF, 3), `; χ<sub>F</sub> = 0,5/λ̄<sub>F</sub> ≤ 1 = ${f(p.chi, 3)}; L<sub>eff</sub> = ${f(p.Leff, 1)} mm`, '6.4');
+  h += eq('F_{Rd}', 'f_{yw}·L_{eff}·t_{w}/γ_{M1}', '', kN(p.FRd), 'kN', '6.1') + line(`η<sub>2</sub> = F<sub>Ed</sub>/F<sub>Rd</sub> = ${kN(p.F)}/${kN(p.FRd)} = <b>${f(p.u, 3)}</b> ≤ 1,0${okS(p.u)}`, '6.14');
+  return h;
+}
+
+/* fragment raportu dla jednego sprawdzenia („jak obliczono”) */
+RP.explain = function (S, R, c) {
+  const full = RP.build(S, R, { data: false });
+  const tag = `<!--ck:${c.id}-->`;
+  let i = full.indexOf(tag);
+  if (i < 0 && /^w3-/.test(c.id)) i = full.indexOf(`<!--ck:w-${c.id.slice(3)}-->`);
+  if (i >= 0) { const id = full.slice(i + 7, full.indexOf('-->', i)); const j = full.indexOf(`<!--/ck:${id}-->`, i); return full.slice(i, j); }
+  // brak znacznika – rozdział raportu wg grupy
+  const rx = /^SGN – nośność/.test(c.grp) ? /SGN – nośność/ : /^SGN – stateczność/.test(c.grp) ? /stateczność/ : /^SGU/.test(c.grp) ? /SGU/ : /^Podpory/.test(c.grp) ? /Podpory/ : /^Pożar/.test(c.grp) ? /pożaru/ : /^Zmęczenie/.test(c.grp) ? /Zmęczenie/ : /^Kruche/.test(c.grp) ? /kruche/ : /1993-1-5/.test(c.grp) ? /Środnik/ : null;
+  if (!rx) return '';
+  const parts = full.split(/(?=<h2>)/);
+  const sec = parts.find(p => rx.test((/<h2>([^<]*)<\/h2>/.exec(p) || [])[1] || ''));
+  return sec ? sec.replace(/<h2>[^<]*<\/h2>/, '') : '';
+};
+
+/* pełny, samodzielny dokument HTML raportu (z osadzonymi danymi projektu) */
+RP.document = function (S, R, body, title) {
+  const css = (typeof document !== 'undefined' && document.getElementById('appcss') || {}).textContent || '';
   const data = JSON.stringify(S).replace(/<\//g, '<\\/');
-  return `<!doctype html><html lang="pl" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc('Raport – ' + (S.meta.nazwa || 'belka'))}</title><meta name="generator" content="${esc(BS.APP + ' ' + BS.VERSION + '; ' + BS.ENGINE)}"><meta name="belkastal-sha256" content="${R.hash}"><style>${css}
-html,body{height:auto;overflow:auto;background:#fff}body{padding:20px 16px}#report{border:0}@media print{body{padding:0}.rtools{display:none}}</style></head><body><div class="rtools"><button class="btn pri" onclick="window.print()">Drukuj / zapisz PDF</button><span class="hint" style="margin-left:10px">Plik zawiera dane projektu – można go otworzyć w programie ${BS.APP} (Otwórz).</span></div><div id="report">${RP.build(S, R)}</div><script type="application/json" id="belkastal-dane">${data}</script></body></html>`;
+  return `<!doctype html><html lang="pl" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title || ('Raport – ' + (S.meta.nazwa || 'belka')))}</title><meta name="generator" content="${esc(BS.APP + ' ' + BS.VERSION + '; ' + BS.ENGINE)}"><meta name="belkastal-sha256" content="${R ? R.hash : ''}"><style>${css}
+html,body{height:auto;overflow:auto;background:#fff}body{padding:20px 16px}#report{border:0}@media print{body{padding:0}.rtools{display:none}}</style></head><body><div class="rtools"><button class="btn pri" onclick="window.print()">Drukuj / zapisz PDF</button><span class="hint" style="margin-left:10px">Plik zawiera dane projektu – można go otworzyć w programie ${BS.APP} (Otwórz).</span></div><div id="report">${body}</div><script type="application/json" id="belkastal-dane">${data}</script></body></html>`;
 };
 
 })(typeof globalThis !== 'undefined' ? globalThis : this);
