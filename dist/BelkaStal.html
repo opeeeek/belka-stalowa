@@ -815,6 +815,9 @@ table.ctab td.tk input[data-tick] { accent-color: var(--ok); cursor: default; }
 .elevbox .vhead { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 8px; }
 .stfdet { overflow-x: auto; margin: 4px 0 8px; }
 .stfdet svg { max-width: 100%; height: auto; }
+.combo.ro input:disabled { background: var(--bg2, #f3f5f8); color: inherit; opacity: 1; }
+.combo.ro .autob { font-size: 10px; font-weight: 600; color: #1d5bb8; padding: 0 6px; align-self: center; }
+.ftab { width: 100%; margin: 2px 0 6px; } .ftab td { padding: 3px 6px; } .ftab tr.sum td { border-top: 1px solid var(--line, #d5dae3); }
 </style>
 </head>
 <body>
@@ -4047,7 +4050,7 @@ KT.hefDef = (typ, d) => (typ === 'wbetonowane' ? Math.max(150, Math.ceil(10 * d 
 
 KT.defaults = function (sec, typ) {
   const bf = sec ? (sec.bd || sec.b || 100) : 100, t = typ || 'wklejane', d = 20;
-  return { on: true, typ: t, d: 'M20', kl: '5.8', nL: 1, sB: KT.sBmin(bf, d, 4), sL: 100, hef: KT.hefDef(t, d), tauCr: 5, tauUcr: 9, NRkp: '', dh: '', ginst: '', otw: 'normalne', tg: 10, rysy: true, zbrKr: false, zbrGes: false, utw: false };
+  return { on: true, auto: true, stab: true, typ: t, d: 'M20', kl: '5.8', nL: 1, sB: KT.sBmin(bf, d, 4), sL: 100, hef: KT.hefDef(t, d), tauCr: 5, tauUcr: 9, NRkp: '', dh: '', ginst: '', otw: 'normalne', tg: 10, rysy: true, zbrKr: false, zbrGes: false, utw: false };
 };
 // parametry podpory betonowej i blachy (w węźle): b_c, l_c (0 – ściana ciągła), h_c, e_c, spoina a_w, siły dodatkowe
 KT.supDefaults = () => ({ bc: 300, lc: 0, hc: 400, ec: 0, aw: 4, Hx: 0, Hy: 0, Nt: 0 });
@@ -4289,6 +4292,7 @@ KT.design = function (ctx, w, F) {
     o.dmin('blacha podstawy', 'blacha w obrysie podpory (od czoła)', g.pxZ, 0, 'zal', 'oparcie');
   }
   if (g.hc < BIG / 2) o.dmin(el, `grubość elementu betonowego h ≥ h_min ≈ ${f(T.hmin, 0)} mm (ETA)`, g.hc, T.hmin, 'zal', 'ETA wyrobu');
+  if (g.hc < BIG / 2) o.dmin(el, 'kotwa w obrysie elementu: h_c ≥ h_ef (+ płytka i nakrętka) + 30 mm otuliny', g.hc, hef + (k.typ === 'wbetonowane' ? (o.len.tAP || 10) + g.H.m : 0) + 30, 'min', 'geometria');
   if (k.typ === 'wklejane') { o.dmin(el, 'h_ef ≥ max(60; 4d) (ETA – typowo)', hef, Math.max(60, 4 * d), 'zal', 'ETA wyrobu'); o.dmax(el, 'h_ef ≤ 20d (ETA – typowo)', hef, 20 * d, 'zal'); }
   else o.dmin(el, 'h_ef ≥ 40 mm', hef, 40, 'min', 'PN-EN 1992-4 1.1');
   if (k.typ === 'wbetonowane') o.dmin(el, 'płytka kotwiąca: d_h ≥ 2d', T.dh, 2 * d, 'zal', 'PN-EN 1992-4 7.2.1.5');
@@ -4306,6 +4310,72 @@ KT.txt = function (w) {
   const nL = U.clamp(Math.round(U.num(k.nL, 1)), 1, 3);
   return `${2 * nL} × ${k.d} kl. ${k.kl}, ${KT.KROTKO[k.typ] || k.typ}, h_ef = ${U.fmt(U.num(k.hef), 0)} mm, rozstaw ${U.fmt(U.num(k.sB), 0)}${nL > 1 ? ` × ${U.fmt(U.num(k.sL), 0)}` : ''} mm`;
 };
+
+/* ---------------------------------------------------------- dobór automatyczny: kotwy, rozstaw i płyta podstawy
+   Zmienne: średnica (od M16), liczba rzędów n_L, h_ef (kotwy wklejane / wbetonowane; rozporowe – h_ef z ETA bez zmian),
+   rozstaw s_B (minimalny przy pasie), s_L, płyta b_p × l_p × t_p (l_p ≤ b_c, b_p ≤ l_c), l_b = l_p.
+   Warunki: docisk płyty do betonu, wszystkie sprawdzenia kotew, blachy i spoin, wymagania konstrukcyjne.
+   Kryterium: najmniejszy koszt umowny [kg] = masa płyty + 4·masa kotew + 0,4·n + 2·10⁻⁵·n·h_ef·d (wiercenie, zaprawa).
+   Wynik zależy tylko od danych wejściowych (nie od wymiarów dobranych poprzednio) – obliczenia odtwarzalne. */
+KT.bearArgs = (w) => ({ podloze: w.podloze, bp: U.num(w.bp), lp: U.num(w.lp), tp: U.num(w.tp), beton: w.beton, alfa: w.alfa, fd: w.fd, beta: w.beta, lb: U.num(w.lb, U.num(w.lp)), bc: U.num(w.bc, 0), lc: U.num(w.lc, 0), hc: U.num(w.hc, 0), ec: U.num(w.ec, 0) });
+const CACHE = new Map();
+KT.autoBase = function (ctx, w, F, REd, eta) {
+  eta = eta || 1;
+  const { sec, mat, ndp } = ctx, C = BS.C;
+  const key = JSON.stringify([sec.nazwa, sec.h, sec.bd || sec.b, mat.gatunek, ndp.gcK, ndp.gM0, ndp.gM2, ndp.betaJ, ndp.gc, w.beton, w.alfa, w.bc, w.lc, w.hc, w.ec, w.aw, w.podloze, w.kotwy, Math.round(F.N), Math.round(F.Vx), Math.round(F.Vy), Math.round(REd || 0), eta]);
+  if (CACHE.has(key)) return CACHE.get(key);
+  const bf = sec.bd || sec.b || 100, aw = U.num(w.aw, 4) > 0 ? U.num(w.aw, 4) : 4;
+  const k0 = Object.assign(KT.defaults(sec, (w.kotwy || {}).typ), w.kotwy || {});
+  const bc = U.num(w.bc, 0), lc = U.num(w.lc, 0), lpMax = bc > 0 ? bc - 2 * Math.abs(U.num(w.ec, 0)) : 500, bpMax = lc > 0 ? lc : 900;
+  const okA = (o) => o.checks.every(c => c.u <= eta + 1e-9) && o.detalFail.length === 0;
+  const okB = (ww) => { if (!(REd > 0) || w.podloze === 'stal') return true; const o = C.bearingPlate(sec, mat, ndp, KT.bearArgs(ww), REd); return o.checks.every(c => c.u <= eta + 1e-9); };
+  const kg = 7.85e-6;
+  // warianty kotew uporządkowane wg dolnego oszacowania kosztu
+  const vars = [];
+  KT.SIZES.filter(D => dOf(D) >= 16).forEach(D => {
+    const d = dOf(D), df = KT.hw(d).df, sB = KT.sBmin(bf, d, aw), bp = Math.max(KT.bpMin(sB, d), Math.ceil((bf + 40) / 10) * 10);
+    if (bp > bpMax) return;
+    [1, 2, 3].forEach(nL => {
+      const sL = nL > 1 ? Math.ceil(Math.max(5 * d, 3 * df) / 10) * 10 : U.num(k0.sL, 100);
+      const lpMin = Math.max(100, Math.ceil(((nL - 1) * sL + 2.4 * df) / 10) * 10);
+      if (lpMin > lpMax) return;
+      const hefs = k0.typ === 'wbetonowane' ? [150, 200, 250, 300, 350, 400, 500] : k0.typ === 'rozporowe' ? [U.num(k0.hef, KT.hefDef('rozporowe', d))] : [8, 10, 12, 15, 20].map(m => Math.ceil(m * d / 10) * 10).filter(h => h >= 60);
+      hefs.forEach(hef => {
+        const kk = Object.assign({}, k0, { d: D, nL, hef, sB, sL });
+        const n = 2 * nL, L = KT.length(KT.geom(sec, Object.assign({}, w, { bp, lp: lpMin, tp: 10, kotwy: kk }))).Lr;
+        const cA = 4 * n * kg * Math.PI / 4 * d * d * L + 0.4 * n + 2e-5 * n * hef * d;
+        vars.push({ kk, bp, lpMin, n, cA, lb: cA + kg * bp * lpMin * 10 });
+      });
+    });
+  });
+  vars.sort((a, b) => a.lb - b.lb);
+  const lps = (m) => Array.from(new Set([m, 120, 150, 180, 200, 250, 300, 350, 400, 450, 500].filter(v => v >= m && v <= lpMax)));
+  let best = null, tries = 0;
+  for (const v of vars) {
+    if (best && v.lb >= best.cost) break;
+    // wstępnie: same kotwy przy najcieńszej płycie (najkrótsze ramię przy ścinaniu) – jeśli nie spełniają, wariant odpada
+    const pre = KT.design(ctx, Object.assign({}, w, { bp: v.bp, lp: v.lpMin, tp: 10, lb: v.lpMin, aw, kotwy: v.kk }), F); tries++;
+    if (pre.checks.some(c => /^Kotwy/.test(c.grp) && !(c.u <= eta + 1e-9))) continue;
+    for (const lp of lps(v.lpMin)) {
+      if (best && v.cA + kg * v.bp * lp * 10 >= best.cost) break;
+      let hit = null;
+      for (const tp of [10, 12, 15, 20, 25, 30]) {
+        if (best && v.cA + kg * v.bp * lp * tp >= best.cost) break;
+        const ww = Object.assign({}, w, { bp: v.bp, lp, tp, lb: lp, aw, kotwy: v.kk });
+        if (!okB(ww)) continue;
+        tries++; const o = KT.design(ctx, ww, F);
+        if (okA(o)) { hit = { w: ww, o, cost: v.cA + kg * v.bp * lp * tp }; break; }
+      }
+      if (hit) { if (!best || hit.cost < best.cost) best = hit; break; }
+    }
+  }
+  const res = best ? { ok: true, w: best.w, o: best.o, cost: best.cost, tries } : { ok: false, tries };
+  if (CACHE.size > 60) CACHE.clear();
+  CACHE.set(key, res);
+  return res;
+};
+// opis wariantu dobranego automatycznie
+KT.autoTxt = (w) => `płyta ${U.fmt(U.num(w.bp), 0)}×${U.fmt(U.num(w.lp), 0)}×${U.fmt(U.num(w.tp), 0)} mm, kotwy ${KT.txt(w)}`;
 
 /* ---------------------------------------------------------- dobór kotew (i szerokości płyty) */
 // wariant o najmniejszym „koszcie” n·d²·(h_ef + 50) spełniający wszystkie warunki; typ i klasa – jak wybrane
@@ -4559,7 +4629,7 @@ J.defaultState = function () {
     geom: { przesla: [6.0], wspL: 0, wspP: 0 },
     podpory: [
       { typ: 'przegub', ltb: 'widelkowe', ss: 0, c: 0, wezel: { typ: 'blacha_czolowa', hp: 200, bp: 150, tp: 10, nr: 2, d: 'M20', kl: '8.8', e1: 40, p1: 120, e2: 30, p3: 90, a: 5, gatP: 'S235', sup: 'pas_slupa', tsup: 12, supGat: 'S355', gwint: true, otw: 'normalne', Nt: 0 } },
-      { typ: 'przegub', ltb: 'widelkowe', ss: 150, c: 50, wezel: { typ: 'oparcie', podloze: 'beton', bp: 280, lp: 150, tp: 15, beton: 'C25/30', alfa: '', lb: 150, zebro: false, bs: 70, ts: 10, ch: '', bc: 300, lc: 0, hc: 400, ec: 0, aw: 4, Hx: 0, Hy: 0, Nt: 0, kotwy: { on: true, typ: 'wklejane', d: 'M20', kl: '5.8', nL: 1, sB: 210, sL: 100, hef: 160, tauCr: 5, tauUcr: 9, NRkp: '', dh: '', ginst: '', otw: 'normalne', tg: 10, rysy: true, zbrKr: false, zbrGes: false, utw: false } } }
+      { typ: 'przegub', ltb: 'widelkowe', ss: 150, c: 50, wezel: { typ: 'oparcie', podloze: 'beton', bp: 280, lp: 150, tp: 15, beton: 'C25/30', alfa: '', lb: 150, zebro: false, bs: 70, ts: 10, ch: '', bc: 300, lc: 0, hc: 400, ec: 0, aw: 4, Hx: 0, Hy: 0, Nt: 0, kotwy: { on: true, auto: true, stab: true, typ: 'wklejane', d: 'M20', kl: '5.8', nL: 1, sB: 210, sL: 100, hef: 160, tauCr: 5, tauUcr: 9, NRkp: '', dh: '', ginst: '', otw: 'normalne', tg: 10, rysy: true, zbrKr: false, zbrGes: false, utw: false } } }
     ],
     podporyTymczasowe: [],
     przekroj: { typ: 'walc', seria: 'IPE', nr: 300 },
@@ -4941,20 +5011,41 @@ J.supports = function (st, md, an, combos, sec, base, mat, ndp, env, out) {
         }
       }
     }
+    if (w.typ === 'oparcie' && p.typ === 'utwierdzenie' && Mmax > 1e3) out.warnings.push(`Podpora ${p.id}: utwierdzenie na płycie podporowej – moment M_Ed = ${U.fmt(Mmax / 1e6, 1)} kNm nie jest przenoszony w modelu płyty i kotew (sprawdzono jak oparcie przegubowe); zaprojektuj węzeł momentowy lub zmień typ podpory.`);
+    // dobór automatyczny kotew, rozstawu i płyty podstawy – wymiary efektywne węzła (UI przepisuje je do danych)
+    let wE = w, F2 = null;
+    if (J.hasAnchors(w) && sec.kind !== 'L') {
+      F2 = J.anchorForces(w, p, etapy, env, q, md, sec);
+      if (w.kotwy.auto === true) {
+        const a = KT.autoBase({ sec, mat, ndp }, w, F2, Rmax, 1);
+        if (a.ok) { wE = Object.assign({}, w, { bp: a.w.bp, lp: a.w.lp, tp: a.w.tp, lb: a.w.lb, aw: a.w.aw, kotwy: Object.assign({}, w.kotwy, { d: a.w.kotwy.d, nL: a.w.kotwy.nL, hef: a.w.kotwy.hef, sB: a.w.kotwy.sB, sL: a.w.kotwy.sL }) }); r.auto = { ok: true, txt: KT.autoTxt(wE) }; }
+        else {
+          // podpowiedź: inny rodzaj kotew lub wyższa klasa stali
+          let alt = null, altK = null;
+          for (const [t, kl] of [['wbetonowane', w.kotwy.kl], ['wklejane', w.kotwy.kl], [w.kotwy.typ, '8.8'], ['wbetonowane', '8.8']]) {
+            if (t === w.kotwy.typ && kl === w.kotwy.kl) continue;
+            const a2 = KT.autoBase({ sec, mat, ndp }, Object.assign({}, w, { kotwy: Object.assign({}, w.kotwy, { typ: t, kl, hef: KT.hefDef(t, 20) }) }), F2, Rmax, 1);
+            if (a2.ok) { alt = `${KT.TYPY[t]}, kl. ${kl}: ${KT.autoTxt(a2.w)}`; altK = { typ: t, kl }; break; }
+          }
+          r.auto = { ok: false, alt, altK };
+          out.warnings.push(`Podpora ${p.id}: dobór automatyczny nie znalazł płyty i kotew spełniających warunki (${KT.TYPY[w.kotwy.typ] || ''}, kl. ${w.kotwy.kl}) – sprawdzono wymiary zadane. ${alt ? `Wariant spełniający warunki: ${alt}.` : 'Zwiększ podporę betonową (b_c, h_c) lub klasę betonu.'}`);
+        }
+      }
+    }
+    r.wezelEff = wE;
     if (w.typ === 'oparcie' && w.podloze !== 'stal' && Rmax > 0) {
-      const bp = C.bearingPlate(sec, mat, ndp, { podloze: w.podloze, bp: U.num(w.bp), lp: U.num(w.lp), tp: U.num(w.tp), beton: w.beton, alfa: w.alfa, fd: w.fd, beta: w.beta, lb: U.num(w.lb, U.num(w.lp)), bc: U.num(w.bc, 0), lc: U.num(w.lc, 0), hc: U.num(w.hc, 0), ec: U.num(w.ec, 0) }, Rmax);
+      const bp = C.bearingPlate(sec, mat, ndp, KT.bearArgs(wE), Rmax);
       r.plyta = bp;
       bp.checks.forEach((c, k) => r.checks.push(BS.check({ id: `${p.id}-B${k}`, grp, n: c.n, ref: c.ref, Ed: c.Ed, Rd: c.Rd, unit: 'F', util: c.u, x: p.x, combo: cMax !== null ? combos[cMax].opis : '', d: c, f: c.f })));
       bp.uwagi.forEach(u => out.warnings.push(`Podpora ${p.id}: ${u}`));
     }
     // kotwienie płyty podporowej w betonie (PN-EN 1992-4) i blacha podstawy przy odrywaniu
-    if (J.hasAnchors(w) && sec.kind !== 'L') {
-      const F2 = J.anchorForces(w, p, etapy, env, q);
+    if (F2) {
       try {
-        const ko = KT.design({ sec, mat, ndp }, w, F2);
+        const ko = KT.design({ sec, mat, ndp }, wE, F2);
         r.kotwy = ko; r.kotwyF = F2;
         J.jointChecks(ko, `${p.id}-K`, grp, p.x, F2.opis).forEach(c => r.checks.push(c));
-        if (!(F2.N > 0 || F2.Vx > 0 || F2.Vy > 0)) r.checks.push(BS.check({ id: `${p.id}-K0`, grp, n: `Kotwy płyty podporowej (${KT.txt(w)}) – konstrukcyjne: brak siły odrywającej i poziomej w kombinacjach SGN`, ref: 'PN-EN 1992-4', Ed: null, Rd: null, unit: 'F', util: null, info: true, x: p.x, combo: F2.opis }));
+        if (!(F2.N > 0 || F2.Vx > 0 || F2.Vy > 0)) r.checks.push(BS.check({ id: `${p.id}-K0`, grp, n: `Kotwy płyty podporowej (${KT.txt(wE)}) – konstrukcyjne: brak siły odrywającej i poziomej w kombinacjach SGN`, ref: 'PN-EN 1992-4', Ed: null, Rd: null, unit: 'F', util: null, info: true, x: p.x, combo: F2.opis }));
         ko.uwagi.forEach(u => out.warnings.push(`Podpora ${p.id}: ${u}`));
       } catch (e) { out.errors.push(`Podpora ${p.id} – kotwy: ${e.message}`); }
     }
@@ -4974,19 +5065,47 @@ J.supports = function (st, md, an, combos, sec, base, mat, ndp, env, out) {
 J.hasAnchors = (w) => !!(w && w.typ === 'oparcie' && w.podloze === 'beton' && w.kotwy && w.kotwy.on !== false);
 // siły na grupę kotew: odrywanie (min. reakcja SGN lub EQU), V_x – siła osiowa belki (podpora nieprzesuwna), V_y – reakcja pozioma
 // w poprzek belki; + siły dodatkowe zadane w węźle (stężenia, temperatura, siły montażowe)
-J.anchorForces = function (w, p, etapy, env, equ) {
-  let RminS = Infinity, Nax = 0, Ry = 0;
-  etapy.forEach(e => { const q = env[e].R[p.id]; if (q) { if (isFinite(q.min)) RminS = Math.min(RminS, q.min); Ry = Math.max(Ry, q.Rymax || 0); } if (isFinite(env[e].Nmax)) Nax = Math.max(Nax, Math.abs(env[e].Nmax), Math.abs(env[e].Nmin)); });
+J.anchorForces = function (w, p, etapy, env, equ, md, sec) {
+  let RminS = Infinity, Nax = 0, Ry = 0, Nf = 0, eNf = null;
+  const ci = (md && md.ciagle) || {}, hs = sec ? (sec.hs || sec.h) : 0, kot = w.kotwy || {};
+  etapy.forEach(e => {
+    const ev = env[e]; if (!ev) return;
+    const q = ev.R[p.id]; if (q) { if (isFinite(q.min)) RminS = Math.min(RminS, q.min); Ry = Math.max(Ry, q.Rymax || 0); }
+    if (isFinite(ev.Nmax)) Nax = Math.max(Nax, Math.abs(ev.Nmax), Math.abs(ev.Nmin));
+    // siła w pasie ściskanym N_f = M/h_s w etapach bez stężenia ciągłego tego pasa (siła stabilizująca – PN-EN 1993-1-1 5.3.3)
+    if (hs > 0 && kot.stab !== false && p.ltb !== 'brak') {
+      const topBr = ci.pasG && e >= U.num(ci.odEtapu, 0), botBr = ci.pasD && e >= U.num(ci.odEtapuD, 0);
+      let Mp = 0, Mn = 0; for (let i = 0; i < ev.Mmax.length; i++) { if (isFinite(ev.Mmax[i])) Mp = Math.max(Mp, ev.Mmax[i]); if (isFinite(ev.Mmin[i])) Mn = Math.max(Mn, -ev.Mmin[i]); }
+      const nf = Math.max(topBr ? 0 : Mp / hs, botBr ? 0 : Mn / hs); if (nf > Nf) { Nf = nf; eNf = e; }
+    }
+  });
+  // reakcja podparcia widełkowego od imperfekcji pasa ściskanego: q_d = N_f·8e₀/L², e₀ = L/500 (α_m = 1, δ_q = 0) → R = q_d·L/2 = N_f/125
+  const Hst = Nf / 125;
   const RminE = (equ || []).length ? Math.min(...equ.map(z => z.Rmin)) : Infinity;
   const Nsgn = Math.max(0, isFinite(RminS) ? -RminS : 0), Nequ = Math.max(0, isFinite(RminE) ? -RminE : 0);
   const Nt = Math.max(0, U.num(w.Nt, 0)) * 1e3, Hx = Math.abs(U.num(w.Hx, 0)) * 1e3, Hy = Math.abs(U.num(w.Hy, 0)) * 1e3;
   const VxN = p.przesuwna ? 0 : Nax;
   const parts = [];
+  if (Hst > 0) parts.push(`V_y,stab = N_f/125 = ${U.fmt(Nf / 1e3, 1)}/125 = ${U.fmt(Hst / 1e3, 2)} kN – siła stabilizująca podparcia widełkowego (PN-EN 1993-1-1 5.3.3; N_f = M_Ed/h_s, etap ${eNf + 1} bez stężenia ciągłego pasa)`);
   if (Nsgn > 0 || Nequ > 0) parts.push(`odrywanie: max(SGN ${U.fmt(Nsgn / 1e3, 1)}; EQU ${U.fmt(Nequ / 1e3, 1)}) kN`);
   if (VxN > 0) parts.push(`V_x = |N_Ed| belki = ${U.fmt(VxN / 1e3, 1)} kN (podpora nieprzesuwna)`);
   if (Ry > 0) parts.push(`V_y = reakcja pozioma ${U.fmt(Ry / 1e3, 1)} kN`);
   if (Nt || Hx || Hy) parts.push(`siły dodatkowe: N_t = ${U.fmt(Nt / 1e3, 1)}, H_x = ${U.fmt(Hx / 1e3, 1)}, H_y = ${U.fmt(Hy / 1e3, 1)} kN`);
-  return { N: Math.max(Nsgn, Nequ) + Nt, Vx: VxN + Hx, Vy: Ry + Hy, Nsgn, Nequ, VxN, Ry, Nt, Hx, Hy, opis: parts.join('; ') || 'brak sił w kombinacjach – kotwy konstrukcyjne' };
+  return { N: Math.max(Nsgn, Nequ) + Nt, Vx: VxN + Hx, Vy: Ry + Hst + Hy, Nsgn, Nequ, VxN, Ry, Hst, Nf, Nt, Hx, Hy, opis: parts.join('; ') || 'brak sił w kombinacjach – kotwy konstrukcyjne' };
+};
+
+// przepisanie wymiarów dobranych automatycznie (płyta, kotwy) do danych projektu; zwraca true, gdy coś się zmieniło
+J.syncAuto = function (st, r) {
+  if (!r || !r.podpory || !r.md) return false;
+  let ch = false;
+  r.podpory.forEach(rp => {
+    if (!rp.auto || !rp.auto.ok || !rp.wezelEff) return;
+    const i = r.md.sup.findIndex(z => z.id === rp.id); const w = i >= 0 && st.podpory[i] && st.podpory[i].wezel; if (!w || !w.kotwy || w.kotwy.auto !== true) return;
+    const e = rp.wezelEff;
+    ['bp', 'lp', 'tp', 'lb', 'aw'].forEach(k => { if (w[k] !== e[k]) { w[k] = e[k]; ch = true; } });
+    ['d', 'nL', 'hef', 'sB', 'sL'].forEach(k => { if (w.kotwy[k] !== e.kotwy[k]) { w.kotwy[k] = e.kotwy[k]; ch = true; } });
+  });
+  return ch;
 };
 
 /* ---------------------------------------------------------- żebra poprzeczne środnika */
@@ -5316,7 +5435,9 @@ J.dobierzWezly = function (st0, r, eta) {
       else { allOk = false; log.push(`Podpora ${p.id}: nie znaleziono wariantu „${W.TYPY[w.typ]}” spełniającego warunki – zmień rodzaj połączenia lub klasę śrub.`); }
     } else if (sec.kind !== 'L') {
       // oparcie – płyta podporowa i ewentualne żebra
-      if (w.typ === 'oparcie' && w.podloze !== 'stal') {
+      if (w.typ === 'oparcie' && w.podloze !== 'stal' && J.hasAnchors(w) && w.kotwy.auto === true) {
+        if (p.auto && p.auto.ok) log.push(`Podpora ${p.id}: dobór automatyczny – ${p.auto.txt}.`); else { allOk = false; log.push(`Podpora ${p.id}: dobór automatyczny płyty i kotew nie znalazł wariantu – zwiększ podporę betonową lub zmień rodzaj kotew.`); }
+      } else if (w.typ === 'oparcie' && w.podloze !== 'stal') {
         let ok = false;
         for (const lp of [100, 120, 150, 180, 200, 250, 300, 350, 400]) { for (const tp of [10, 12, 15, 20, 25, 30]) {
           const bp = Math.max(U.num(w.bp, 0), Math.ceil((Math.max(sec.bd || sec.b, sec.b) + 40) / 10) * 10);
@@ -6815,7 +6936,8 @@ function anchorBody(S, R, o, F, w, idp) {
   let h = `<div class="fig">${v.plan}${v.sect}</div>`;
   h += line(`Kotwy: <b>${esc(BS.KT.txt(w))}</b> – ${esc(BS.KT.TYPY[k.typ] || k.typ)}; stal f<sub>yk</sub> = ${o.kl.fyk} MPa, f<sub>uk</sub> = ${o.kl.fuk} MPa, A<sub>s</sub> = ${f(g.As, 1)} mm²; γ<sub>Ms,N</sub> = ${f(o.gMsN, 2)}, γ<sub>Ms,V</sub> = ${f(o.gMsV, 2)}; beton ${esc(w.beton || '')} (f<sub>ck</sub> = ${f(o.fck, 0)} MPa) ${o.cr ? 'zarysowany' : 'niezarysowany'}; γ<sub>Mc</sub> = γ<sub>c</sub>·γ<sub>inst</sub> = ${f(o.gMc / o.ginst, 2)}·${f(o.ginst, 2)} = ${f(o.gMc, 2)}`, 'PN-EN 1992-4 4.4, 7');
   h += line(`Geometria: n = ${g.n} (${g.nL} ${g.nL > 1 ? 'rzędy' : 'rząd'} × 2 kotwy po obu stronach pasa), s<sub>B</sub> = ${f(g.sB, 0)} mm${g.nL > 1 ? `, s<sub>L</sub> = ${f(g.sL, 0)} mm` : ''}, h<sub>ef</sub> = ${f(o.hef, 0)} mm; ${OTW[k.otw] || ''} d<sub>f</sub> = ${f(g.df, 0)} mm; podlewka t<sub>g</sub> = ${f(tg, 0)} mm; płyta ${f(g.bp, 0)}×${f(g.lp, 0)}×${f(g.tp, 0)} mm (e<sub>1</sub> = ${f(g.e1, 0)}, e<sub>2</sub> = ${f(g.e2, 0)} mm); podpora betonowa b<sub>c</sub> = ${g.bc > 0 ? f(g.bc, 0) : '—'}, l<sub>c</sub> = ${g.lc > 0 ? f(g.lc, 0) : '∞ (ściana)'}, h<sub>c</sub> = ${cc(g.hc)} mm; odległości kotew od krawędzi: c<sub>x</sub> = ${cc(g.cxZ)} / ${cc(g.cxP)} mm (czoło / przęsło), c<sub>y</sub> = ${cc(g.cy)} mm`);
-  h += line(`Siły na grupę kotew: N<sub>Ed</sub> = ${kN(o.Nd)} kN (odrywanie), V<sub>x,Ed</sub> = ${kN(o.Vx)} kN, V<sub>y,Ed</sub> = ${kN(o.Vy)} kN – ${esc(F.opis || '')}`, 'PN-EN 1990 6.4.3; tabl. A1.2');
+  h += line(`Siły na grupę kotew (zebrane z kombinacji wszystkich etapów): N<sub>Ed</sub> = ${kN(o.Nd)} kN (odrywanie), V<sub>x,Ed</sub> = ${kN(o.Vx)} kN, V<sub>y,Ed</sub> = ${kN(o.Vy)} kN – ${esc(F.opis || '')}`, 'PN-EN 1990 6.4.3; PN-EN 1993-1-1 5.3.3');
+  if (k.auto === true) h += line('Kotwy (średnica, liczba, h<sub>ef</sub>), rozstaw i płyta podstawy dobrane automatycznie: wariant o najmniejszym koszcie umownym (masa płyty + 4·masa kotew + robocizna i wiercenie) spełniający wszystkie warunki nośności i wymagania konstrukcyjne; rodzaj i klasa kotew, otwory, podlewka i dane betonu – zadane.');
   h += line(`Długość kotwy: ${esc(o.len.opis)} = ${f(o.len.L, 0)} mm → <b>L = ${f(o.len.Lr, 0)} mm</b>${o.len.h0 ? `; otwór wiercony Ø${f(o.len.dDrill, 0)} mm, głęb. ${f(o.len.h0, 0)} mm` : ''}`);
   if (!o.checks.length) h += line('Brak siły odrywającej i poziomej – kotwy konstrukcyjne (ustalenie położenia płyty); sprawdzono wymagania konstrukcyjne.');
   return h + checksBody(o, idp);
@@ -7380,7 +7502,7 @@ function changed(rerender) {
 }
 A.changed = changed;
 function recalc() {
-  try { R = J.run(S); } catch (e) { console.error(e); R = { errors: ['Błąd obliczeń: ' + e.message], warnings: [], checks: [], info: [] }; }
+  try { R = J.run(S); if (J.syncAuto(S, R)) R = J.run(S); } catch (e) { console.error(e); R = { errors: ['Błąd obliczeń: ' + e.message], warnings: [], checks: [], info: [] }; }
   rendered = {};
   renderStatus(); renderDsum(); refreshHints(); renderDataSide(); renderActive();
   if (popRedraw && Q.isModal()) { try { popRedraw(); } catch (e) { console.error(e); } }
@@ -7983,6 +8105,8 @@ const JDEF = (v, h) => ({
 A.JDEF = JDEF;
 const BOLTS = () => Object.keys(M.SRUBY).map(k => [k, k]), BKL = () => Object.keys(M.SRUBY_KL).map(k => [k, 'kl. ' + k]);
 /* ---------------------------------------------------------- płyta na betonie: podpora, kotwy (PN-EN 1992-4), siły dodatkowe */
+// pole tylko do odczytu – wartość dobrana automatycznie
+const roF = (l, v, u) => `<div class="row"><label>${sym(l)}</label><div class="combo ro" title="Dobór automatyczny – wyłącz „Dobór automatyczny”, aby zmienić ręcznie"><input value="${esc(showNum(v))}" disabled><span class="autob">auto</span></div><span class="unit">${u || ''}</span></div>`;
 function anchorFields(i, w, q, sec, sub) {
   const KT = BS.KT, r = R(), id = r && r.md && r.md.sup[i] ? r.md.sup[i].id : null, rp = r && (r.podpory || []).find(z => z.id === id), pl = rp && rp.plyta;
   let h = fNum(q + '.alfa', 'α = √(A_{c1}/A_{c0}) ≤ 3 (puste – z wymiarów podpory)', '', [1, 1.5, 2, 2.5, 3], { min: 1, max: 3, opt: true, ph: pl && pl.alfa ? fmt(pl.alfa, 2) : '1' });
@@ -7992,13 +8116,20 @@ function anchorFields(i, w, q, sec, sub) {
   if (!w.kotwy) return h + `<label class="chk"><input type="checkbox" data-kton="${i}"><span>Kotwienie płyty w betonie</span></label>`;
   h += fChk(q + '.kotwy.on', 'Kotwienie płyty w betonie', { re: true });
   if (w.kotwy.on === false) return h;
-  const k = w.kotwy, d = M.SRUBY[k.d] ? M.SRUBY[k.d].d : 20, bf = sec ? (sec.bd || sec.b || 100) : 100, sBm = KT.sBmin(bf, d, U.num(w.aw, 0));
+  const k = w.kotwy, d = M.SRUBY[k.d] ? M.SRUBY[k.d].d : 20, bf = sec ? (sec.bd || sec.b || 100) : 100, sBm = KT.sBmin(bf, d, U.num(w.aw, 0)), auto = k.auto === true;
+  h += fChk(q + '.kotwy.auto', 'Dobór automatyczny: kotwy (średnica, liczba, h_{ef}), rozstaw i płyta podstawy b_{p} × l_{p} × t_{p}', { re: true });
+  if (auto) h += `<p class="hint" style="margin:2px 0 6px">${rp && rp.auto ? (rp.auto.ok ? `Dobrano: <b>${esc(rp.auto.txt)}</b> – najmniejszy koszt umowny spełniający wszystkie warunki (docisk, kotwy, blacha, spoiny, wymagania konstrukcyjne); przelicza się przy każdej zmianie obciążeń.` : `<span class="fail">Nie znaleziono wariantu spełniającego warunki</span> dla wybranego rodzaju i klasy kotew${rp.auto.alt ? ` – spełnia: <b>${esc(rp.auto.alt)}</b> <button class="btn sm pri" data-ktalt="${i}" type="button">Zastosuj ten rodzaj kotew</button>` : ' – zwiększ podporę betonową (b<sub>c</sub>, h<sub>c</sub>) lub klasę betonu'}.`) : ''} Rodzaj i klasę kotew, otwory, podlewkę i dane betonu ustalasz poniżej.</p>`;
   h += fSel(q + '.kotwy.typ', 'Rodzaj kotew', Object.keys(KT.TYPY).map(t => [t, KT.TYPY[t]]), { wide: true });
-  h += fSel(q + '.kotwy.d', 'Średnica kotwy', KT.SIZES.map(s => [s, s])) + fSel(q + '.kotwy.kl', 'Klasa stali kotwy', Object.keys(KT.KL).map(c => [c, `${c} (f_uk = ${KT.KL[c].fuk} MPa)`]));
-  h += fSel(q + '.kotwy.nL', 'Rzędy kotew wzdłuż belki n_{L}', [[1, '1 rząd – 2 kotwy'], [2, '2 rzędy – 4 kotwy'], [3, '3 rzędy – 6 kotew']], { num: true });
-  h += fNum(q + '.kotwy.sB', 'Rozstaw w poprzek belki s_{B}', 'mm', [140, 160, 180, 200, 220, 250, 300], { min: 20 });
-  if (U.num(k.nL, 1) > 1) h += fNum(q + '.kotwy.sL', 'Rozstaw wzdłuż belki s_{L}', 'mm', [80, 100, 120, 150, 200], { min: 20 });
-  h += fNum(q + '.kotwy.hef', 'Głębokość zakotwienia h_{ef}', 'mm', k.typ === 'wbetonowane' ? [150, 200, 250, 300, 400, 500] : k.typ === 'rozporowe' ? [40, 50, 60, 70, 80, 100, 125] : [80, 100, 125, 160, 200, 250, 300], { min: 30 });
+  h += (auto ? roF('Średnica kotwy', k.d, '') : fSel(q + '.kotwy.d', 'Średnica kotwy', KT.SIZES.map(s => [s, s]))) + fSel(q + '.kotwy.kl', 'Klasa stali kotwy', Object.keys(KT.KL).map(c => [c, `${c} (f_uk = ${KT.KL[c].fuk} MPa)`]));
+  if (auto) {
+    h += roF('Rzędy kotew wzdłuż belki n_{L}', `${k.nL} (${2 * U.num(k.nL, 1)} kotwy)`, '') + roF('Rozstaw w poprzek belki s_{B}', k.sB, 'mm') + (U.num(k.nL, 1) > 1 ? roF('Rozstaw wzdłuż belki s_{L}', k.sL, 'mm') : '');
+    h += k.typ === 'rozporowe' ? fNum(q + '.kotwy.hef', 'Głębokość zakotwienia h_{ef} (ETA)', 'mm', [40, 50, 60, 70, 80, 100, 125], { min: 30 }) : roF('Głębokość zakotwienia h_{ef}', k.hef, 'mm');
+  } else {
+    h += fSel(q + '.kotwy.nL', 'Rzędy kotew wzdłuż belki n_{L}', [[1, '1 rząd – 2 kotwy'], [2, '2 rzędy – 4 kotwy'], [3, '3 rzędy – 6 kotew']], { num: true });
+    h += fNum(q + '.kotwy.sB', 'Rozstaw w poprzek belki s_{B}', 'mm', [140, 160, 180, 200, 220, 250, 300], { min: 20 });
+    if (U.num(k.nL, 1) > 1) h += fNum(q + '.kotwy.sL', 'Rozstaw wzdłuż belki s_{L}', 'mm', [80, 100, 120, 150, 200], { min: 20 });
+    h += fNum(q + '.kotwy.hef', 'Głębokość zakotwienia h_{ef}', 'mm', k.typ === 'wbetonowane' ? [150, 200, 250, 300, 400, 500] : k.typ === 'rozporowe' ? [40, 50, 60, 70, 80, 100, 125] : [80, 100, 125, 160, 200, 250, 300], { min: 30 });
+  }
   if (k.typ === 'wklejane') h += fNum(q + '.kotwy.tauCr', 'τ_{Rk} – beton zarysowany (ETA)', 'MPa', [3, 4, 5, 6, 7, 8], { min: 0.5 }) + fNum(q + '.kotwy.tauUcr', 'τ_{Rk} – beton niezarysowany (ETA)', 'MPa', [6, 8, 9, 10, 12, 14], { min: 0.5 });
   else if (k.typ === 'rozporowe') h += fNum(q + '.kotwy.NRkp', 'N_{Rk,p} – wyrwanie (ETA)', 'kN', [10, 15, 20, 25, 30, 40, 50], { min: 0, opt: true, ph: 'z ETA' });
   else h += fNum(q + '.kotwy.dh', 'Średnica płytki kotwiącej / łba d_{h}', 'mm', [40, 50, 60, 70, 80, 100], { min: 0, opt: true, ph: String(Math.ceil(3 * d / 5) * 5) });
@@ -8008,17 +8139,22 @@ function anchorFields(i, w, q, sec, sub) {
   h += fChk(q + '.kotwy.rysy', 'Beton zarysowany (bezpiecznie)') + fChk(q + '.kotwy.zbrKr', 'Zbrojenie krawędziowe i strzemiona ≤ 100 mm (ψ_{re,V} = 1,4)') + fChk(q + '.kotwy.zbrGes', 'Gęste zbrojenie przy kotwach (rozstaw < 150 mm) – ψ_{re,N}') + fChk(q + '.kotwy.utw', 'Płyta utwierdzona na kotwach (α_{M} = 2)');
   const ko = rp && rp.kotwy, F2 = rp && rp.kotwyF;
   h += `<p class="hint" style="margin:4px 0">Kotwy po obu stronach pasa: s<sub>B</sub> ≥ ${sBm} mm (pas ${fmt(bf, 0)} mm + podkładka + spoina), płyta b<sub>p</sub> ≥ ${KT.bpMin(Math.max(U.num(k.sB, 0), sBm), d)} mm.${ko ? ` Długość kotwy L = ${fmt(ko.len.Lr, 0)} mm${ko.len.h0 ? `, otwór Ø${fmt(ko.len.dDrill, 0)} × ${fmt(ko.len.h0, 0)} mm` : ''}.` : ''}</p>`;
-  h += sub('anchorF', 'Siły na zakotwienie') + `<p class="hint" style="margin:2px 0 6px">${F2 ? esc(F2.opis) : '—'}. Siła osiowa belki obciąża kotwy tylko na podporze nieprzesuwnej.</p>` + fNum(q + '.Nt', 'Dodatkowa siła odrywająca N_{t}', 'kN', [0, 5, 10, 20, 50], { min: 0 }) + fNum(q + '.Hx', 'Dodatkowa siła pozioma wzdłuż belki H_{x}', 'kN', [0, 5, 10, 20, 50], { min: 0 }) + fNum(q + '.Hy', 'Dodatkowa siła pozioma w poprzek H_{y}', 'kN', [0, 5, 10, 20, 50], { min: 0 });
-  h += `<div class="row wide"><span></span><button class="btn sm" data-ktauto="${i}" type="button" title="Najmniejszy wariant kotew (średnica, liczba, h_ef) i szerokość płyty spełniające warunki – rodzaj kotew i klasa jak wybrane">⚙ Dobierz kotwy</button></div>`;
+  const fk = (v) => fmt((v || 0) / 1e3, 2);
+  h += sub('anchorF', 'Siły na zakotwienie (zbierane automatycznie)');
+  if (F2) h += `<table class="ctab ftab"><tbody><tr><td>Odrywanie N<sub>Ed</sub> – min. reakcja SGN / EQU</td><td class="n">${fk(Math.max(F2.Nsgn, F2.Nequ))} kN</td></tr><tr><td>V<sub>x</sub> – siła osiowa belki${F2.VxN > 0 ? '' : (S().podpory[i].przesuwna ? ' (podpora przesuwna – 0)' : '')}</td><td class="n">${fk(F2.VxN)} kN</td></tr><tr><td>V<sub>y</sub> – reakcja pozioma (obciążenia poziome)</td><td class="n">${fk(F2.Ry)} kN</td></tr><tr><td>V<sub>y</sub> – siła stabilizująca podparcia widełkowego N<sub>f</sub>/125</td><td class="n">${fk(F2.Hst)} kN</td></tr>${F2.Nt || F2.Hx || F2.Hy ? `<tr><td>Siły dodatkowe N<sub>t</sub> / H<sub>x</sub> / H<sub>y</sub></td><td class="n">${fk(F2.Nt)} / ${fk(F2.Hx)} / ${fk(F2.Hy)} kN</td></tr>` : ''}<tr class="sum"><td><b>Razem: N / V<sub>x</sub> / V<sub>y</sub></b></td><td class="n"><b>${fk(F2.N)} / ${fk(F2.Vx)} / ${fk(F2.Vy)} kN</b></td></tr></tbody></table>`;
+  h += `<p class="hint" style="margin:2px 0 6px">Obciążenia zbierane są z kombinacji wszystkich etapów: odrywanie z najmniejszej reakcji (SGN, EQU), siła osiowa belki tylko na podporze nieprzesuwnej, reakcja od obciążeń poziomych oraz siła stabilizująca od imperfekcji pasa ściskanego w etapach bez stężenia ciągłego (PN-EN 1993-1-1, 5.3.3: e<sub>0</sub> = L/500 → R = N<sub>f</sub>/125). Pola poniżej – tylko dla sił spoza modelu (np. temperatura, montaż, stężenia dachowe).</p>`;
+  h += fChk(q + '.kotwy.stab', 'Siła stabilizująca podparcia widełkowego (PN-EN 1993-1-1 5.3.3)') + fNum(q + '.Nt', 'Dodatkowa siła odrywająca N_{t}', 'kN', [0, 5, 10, 20, 50], { min: 0 }) + fNum(q + '.Hx', 'Dodatkowa siła pozioma wzdłuż belki H_{x}', 'kN', [0, 5, 10, 20, 50], { min: 0 }) + fNum(q + '.Hy', 'Dodatkowa siła pozioma w poprzek H_{y}', 'kN', [0, 5, 10, 20, 50], { min: 0 });
+  if (!auto) h += `<div class="row wide"><span></span><button class="btn sm" data-ktauto="${i}" type="button" title="Jednorazowo: najmniejszy wariant kotew (średnica, liczba, h_ef), rozstawu i płyty spełniający warunki – rodzaj i klasa kotew jak wybrane">⚙ Dobierz kotwy i płytę</button></div>`;
   return h;
 }
 A.bindAnchorFields = function (m, redraw) {
   $$('[data-kton]', m).forEach(cb => cb.addEventListener('change', () => { const st = S(), w = st.podpory[+cb.dataset.kton].wezel, sec = R() && R().sec; if (!w) return; const sd = BS.KT.supDefaults(); Object.keys(sd).forEach(k2 => { if (w[k2] === undefined) w[k2] = sd[k2]; }); w.kotwy = BS.KT.defaults(sec); w.bp = Math.max(U.num(w.bp, 0), BS.KT.bpMin(w.kotwy.sB, 20)); A.changed(true); A.recalcNow(); redraw(); }));
+  $$('[data-ktalt]', m).forEach(b => b.addEventListener('click', () => { const i = +b.dataset.ktalt, rp = (R().podpory || []).find(z => z.id === R().md.sup[i].id) || {}, w = S().podpory[i].wezel, ak = rp.auto && rp.auto.altK; if (!ak || !w.kotwy) return; Object.assign(w.kotwy, { typ: ak.typ, kl: ak.kl, hef: BS.KT.hefDef(ak.typ, 20) }); A.changed(true); A.recalcNow(); redraw(); Q.toast(`Kotwy: ${BS.KT.TYPY[ak.typ]}, kl. ${ak.kl} – dobór automatyczny.`); }));
   $$('[data-ktauto]', m).forEach(b => b.addEventListener('click', () => {
     const i = +b.dataset.ktauto, r = R(), st = S(), w = st.podpory[i].wezel, p = r.md.sup[i], rp = (r.podpory || []).find(z => z.id === p.id) || {};
-    let a = null; for (const tp of [U.num(w.tp, 15), 15, 20, 25, 30].filter((v, j, X) => v >= U.num(w.tp, 15) && X.indexOf(v) === j)) { a = BS.KT.auto({ sec: r.sec, mat: r.mat, ndp: r.ndp }, Object.assign({}, w, { tp }), rp.kotwyF || { N: 0, Vx: 0, Vy: 0 }, 1); if (a.ok) break; }
+    const a = BS.KT.autoBase({ sec: r.sec, mat: r.mat, ndp: r.ndp }, w, rp.kotwyF || { N: 0, Vx: 0, Vy: 0 }, rp.Rmax || 0, 1);
     if (!a || !a.ok) { Q.toast('Nie znaleziono wariantu kotew spełniającego warunki – zwiększ podporę betonową, zmień rodzaj kotew lub klasę betonu.'); return; }
-    Object.assign(w, { bp: a.w.bp, lp: a.w.lp, tp: a.w.tp }); w.kotwy = a.w.kotwy; A.changed(true); A.recalcNow(); redraw();
+    Object.assign(w, { bp: a.w.bp, lp: a.w.lp, tp: a.w.tp, lb: a.w.lb, aw: a.w.aw }); ['d', 'nL', 'hef', 'sB', 'sL'].forEach(k2 => { w.kotwy[k2] = a.w.kotwy[k2]; }); A.changed(true); A.recalcNow(); redraw();
     Q.toast(`Kotwy: ${BS.KT.txt(w)}; płyta ${w.bp}×${w.lp}×${w.tp} mm – wytężenie ${Math.round(a.o.u * 100)}%.`);
   }));
 };
@@ -8029,7 +8165,8 @@ function jointFields(i, designer) {
   if (w.typ === 'oparcie') {
     h += fSel(q + '.podloze', 'Podłoże', [['beton', 'beton (PN-EN 1992-1-1, 6.7)'], ['mur', 'mur (PN-EN 1996-1-1, 6.1.3)'], ['stal', 'element stalowy']], { wide: true });
     if (w.podloze !== 'stal') {
-      h += sub('plate', 'Płyta podporowa') + fNum(q + '.bp', 'Szerokość płyty b_{p}', 'mm', [120, 150, 180, 200, 220, 250, 300], { min: 20 }) + fNum(q + '.lp', 'Długość oparcia l_{p}', 'mm', [80, 100, 120, 150, 180, 200, 250], { min: 20 }) + fNum(q + '.tp', 'Grubość płyty t_{p}', 'mm', [8, 10, 12, 15, 20, 25, 30], { min: 4 });
+      const auto = w.podloze === 'beton' && w.kotwy && w.kotwy.on !== false && w.kotwy.auto === true;
+      h += sub('plate', 'Płyta podporowa') + (auto ? roF('Szerokość płyty b_{p}', w.bp, 'mm') + roF('Długość oparcia l_{p}', w.lp, 'mm') + roF('Grubość płyty t_{p}', w.tp, 'mm') : fNum(q + '.bp', 'Szerokość płyty b_{p}', 'mm', [120, 150, 180, 200, 220, 250, 300], { min: 20 }) + fNum(q + '.lp', 'Długość oparcia l_{p}', 'mm', [80, 100, 120, 150, 180, 200, 250], { min: 20 }) + fNum(q + '.tp', 'Grubość płyty t_{p}', 'mm', [8, 10, 12, 15, 20, 25, 30], { min: 4 }));
       if (w.podloze === 'beton') h += fSel(q + '.beton', 'Klasa betonu', Object.keys(M.BETON).map(k => [k, k])) + anchorFields(i, w, q, sec, sub);
       else h += fNum(q + '.fd', 'Wytrzymałość muru f_{d}', 'MPa', [1, 1.5, 2, 2.5, 3, 4], { min: 0.1 }) + fNum(q + '.beta', 'β – docisk skupiony (1,0–1,5)', '', [1, 1.2, 1.5], { min: 1, max: 1.5 });
     }
@@ -8770,7 +8907,7 @@ function build(S, R) {
       const xa = bc > 0 ? p.x + s * (-(bc / 2 + ec)) : p.x - lp / 2 - 120, xb = bc > 0 ? p.x + s * (bc / 2 - ec) : p.x + lp / 2 + 120;
       const yh = lc > 0 ? lc / 2 : bp / 2 + 150, hh = hc > 0 ? Math.min(hc, 900) : 320;
       sc.box(Math.min(xa, xb), Math.max(xa, xb), ywc - yh, ywc + yh, zb - hh, zb, w.podloze === 'mur' ? COL.mur : COL.conc, ob, opts.xray ? 0.45 : 1);
-    }
+    } else { const bf2 = 160, hz = 260; sc.box(p.x - bf2 / 2, p.x + bf2 / 2, ywc - 500, ywc + 500, -12, 0, COL.col, ob, 1, 1); sc.box(p.x - 4, p.x + 4, ywc - 500, ywc + 500, -hz + 12, -12, COL.col, ob); sc.box(p.x - bf2 / 2, p.x + bf2 / 2, ywc - 500, ywc + 500, -hz, -hz + 12, COL.col, ob); }
     // kotwy płyty (pręt, podkładka, nakrętka) – część w betonie widoczna przy belce przezroczystej
     if (kg && w.typ === 'oparcie') {
       const kob = sc.o(`Podpora ${p.id} – kotwy ${BS.KT.txt(w)}, L = ${fmt(ko.len.Lr, 0)} mm`, () => A.supportPopup(i, 'anchors'), { kind: 'sup', x: p.x });
@@ -8782,7 +8919,6 @@ function build(S, R) {
         sc.prism([x, y, H.tw], [x, y, H.tw + H.m], 0.95 * d, 6, COL.bolt, kob, true, Math.PI / 6);
       }));
     }
-    else { const bf2 = 160, hz = 260; sc.box(p.x - bf2 / 2, p.x + bf2 / 2, ywc - 500, ywc + 500, -12, 0, COL.col, ob, 1, 1); sc.box(p.x - 4, p.x + 4, ywc - 500, ywc + 500, -hz + 12, -12, COL.col, ob); sc.box(p.x - bf2 / 2, p.x + bf2 / 2, ywc - 500, ywc + 500, -hz, -hz + 12, COL.col, ob); }
   });
   // podpory montażowe
   md.tmp.forEach(t => { const ob = sc.o(`Podpora montażowa ${t.id} – x = ${fmt(t.x / 1000, 2)} m, usuwana po etapie ${t.do + 1}`, () => A.stagesPopup(), { kind: 'tmp', x: t.x }); sc.box(t.x - 50, t.x + 50, ywc - 50, ywc + 50, -900, 0, COL.tmp, ob, 0.75); });

@@ -807,3 +807,6 @@ table.ctab td.tk input[data-tick] { accent-color: var(--ok); cursor: default; }
 .elevbox .vhead { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 8px; }
 .stfdet { overflow-x: auto; margin: 4px 0 8px; }
 .stfdet svg { max-width: 100%; height: auto; }
+.combo.ro input:disabled { background: var(--bg2, #f3f5f8); color: inherit; opacity: 1; }
+.combo.ro .autob { font-size: 10px; font-weight: 600; color: #1d5bb8; padding: 0 6px; align-self: center; }
+.ftab { width: 100%; margin: 2px 0 6px; } .ftab td { padding: 3px 6px; } .ftab tr.sum td { border-top: 1px solid var(--line, #d5dae3); }

@@ -319,7 +319,7 @@ function changed(rerender) {
 }
 A.changed = changed;
 function recalc() {
-  try { R = J.run(S); } catch (e) { console.error(e); R = { errors: ['Błąd obliczeń: ' + e.message], warnings: [], checks: [], info: [] }; }
+  try { R = J.run(S); if (J.syncAuto(S, R)) R = J.run(S); } catch (e) { console.error(e); R = { errors: ['Błąd obliczeń: ' + e.message], warnings: [], checks: [], info: [] }; }
   rendered = {};
   renderStatus(); renderDsum(); refreshHints(); renderDataSide(); renderActive();
   if (popRedraw && Q.isModal()) { try { popRedraw(); } catch (e) { console.error(e); } }

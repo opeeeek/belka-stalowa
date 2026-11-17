@@ -47,7 +47,7 @@ KT.hefDef = (typ, d) => (typ === 'wbetonowane' ? Math.max(150, Math.ceil(10 * d 
 
 KT.defaults = function (sec, typ) {
   const bf = sec ? (sec.bd || sec.b || 100) : 100, t = typ || 'wklejane', d = 20;
-  return { on: true, typ: t, d: 'M20', kl: '5.8', nL: 1, sB: KT.sBmin(bf, d, 4), sL: 100, hef: KT.hefDef(t, d), tauCr: 5, tauUcr: 9, NRkp: '', dh: '', ginst: '', otw: 'normalne', tg: 10, rysy: true, zbrKr: false, zbrGes: false, utw: false };
+  return { on: true, auto: true, stab: true, typ: t, d: 'M20', kl: '5.8', nL: 1, sB: KT.sBmin(bf, d, 4), sL: 100, hef: KT.hefDef(t, d), tauCr: 5, tauUcr: 9, NRkp: '', dh: '', ginst: '', otw: 'normalne', tg: 10, rysy: true, zbrKr: false, zbrGes: false, utw: false };
 };
 // parametry podpory betonowej i blachy (w węźle): b_c, l_c (0 – ściana ciągła), h_c, e_c, spoina a_w, siły dodatkowe
 KT.supDefaults = () => ({ bc: 300, lc: 0, hc: 400, ec: 0, aw: 4, Hx: 0, Hy: 0, Nt: 0 });
@@ -289,6 +289,7 @@ KT.design = function (ctx, w, F) {
     o.dmin('blacha podstawy', 'blacha w obrysie podpory (od czoła)', g.pxZ, 0, 'zal', 'oparcie');
   }
   if (g.hc < BIG / 2) o.dmin(el, `grubość elementu betonowego h ≥ h_min ≈ ${f(T.hmin, 0)} mm (ETA)`, g.hc, T.hmin, 'zal', 'ETA wyrobu');
+  if (g.hc < BIG / 2) o.dmin(el, 'kotwa w obrysie elementu: h_c ≥ h_ef (+ płytka i nakrętka) + 30 mm otuliny', g.hc, hef + (k.typ === 'wbetonowane' ? (o.len.tAP || 10) + g.H.m : 0) + 30, 'min', 'geometria');
   if (k.typ === 'wklejane') { o.dmin(el, 'h_ef ≥ max(60; 4d) (ETA – typowo)', hef, Math.max(60, 4 * d), 'zal', 'ETA wyrobu'); o.dmax(el, 'h_ef ≤ 20d (ETA – typowo)', hef, 20 * d, 'zal'); }
   else o.dmin(el, 'h_ef ≥ 40 mm', hef, 40, 'min', 'PN-EN 1992-4 1.1');
   if (k.typ === 'wbetonowane') o.dmin(el, 'płytka kotwiąca: d_h ≥ 2d', T.dh, 2 * d, 'zal', 'PN-EN 1992-4 7.2.1.5');
@@ -306,6 +307,72 @@ KT.txt = function (w) {
   const nL = U.clamp(Math.round(U.num(k.nL, 1)), 1, 3);
   return `${2 * nL} × ${k.d} kl. ${k.kl}, ${KT.KROTKO[k.typ] || k.typ}, h_ef = ${U.fmt(U.num(k.hef), 0)} mm, rozstaw ${U.fmt(U.num(k.sB), 0)}${nL > 1 ? ` × ${U.fmt(U.num(k.sL), 0)}` : ''} mm`;
 };
+
+/* ---------------------------------------------------------- dobór automatyczny: kotwy, rozstaw i płyta podstawy
+   Zmienne: średnica (od M16), liczba rzędów n_L, h_ef (kotwy wklejane / wbetonowane; rozporowe – h_ef z ETA bez zmian),
+   rozstaw s_B (minimalny przy pasie), s_L, płyta b_p × l_p × t_p (l_p ≤ b_c, b_p ≤ l_c), l_b = l_p.
+   Warunki: docisk płyty do betonu, wszystkie sprawdzenia kotew, blachy i spoin, wymagania konstrukcyjne.
+   Kryterium: najmniejszy koszt umowny [kg] = masa płyty + 4·masa kotew + 0,4·n + 2·10⁻⁵·n·h_ef·d (wiercenie, zaprawa).
+   Wynik zależy tylko od danych wejściowych (nie od wymiarów dobranych poprzednio) – obliczenia odtwarzalne. */
+KT.bearArgs = (w) => ({ podloze: w.podloze, bp: U.num(w.bp), lp: U.num(w.lp), tp: U.num(w.tp), beton: w.beton, alfa: w.alfa, fd: w.fd, beta: w.beta, lb: U.num(w.lb, U.num(w.lp)), bc: U.num(w.bc, 0), lc: U.num(w.lc, 0), hc: U.num(w.hc, 0), ec: U.num(w.ec, 0) });
+const CACHE = new Map();
+KT.autoBase = function (ctx, w, F, REd, eta) {
+  eta = eta || 1;
+  const { sec, mat, ndp } = ctx, C = BS.C;
+  const key = JSON.stringify([sec.nazwa, sec.h, sec.bd || sec.b, mat.gatunek, ndp.gcK, ndp.gM0, ndp.gM2, ndp.betaJ, ndp.gc, w.beton, w.alfa, w.bc, w.lc, w.hc, w.ec, w.aw, w.podloze, w.kotwy, Math.round(F.N), Math.round(F.Vx), Math.round(F.Vy), Math.round(REd || 0), eta]);
+  if (CACHE.has(key)) return CACHE.get(key);
+  const bf = sec.bd || sec.b || 100, aw = U.num(w.aw, 4) > 0 ? U.num(w.aw, 4) : 4;
+  const k0 = Object.assign(KT.defaults(sec, (w.kotwy || {}).typ), w.kotwy || {});
+  const bc = U.num(w.bc, 0), lc = U.num(w.lc, 0), lpMax = bc > 0 ? bc - 2 * Math.abs(U.num(w.ec, 0)) : 500, bpMax = lc > 0 ? lc : 900;
+  const okA = (o) => o.checks.every(c => c.u <= eta + 1e-9) && o.detalFail.length === 0;
+  const okB = (ww) => { if (!(REd > 0) || w.podloze === 'stal') return true; const o = C.bearingPlate(sec, mat, ndp, KT.bearArgs(ww), REd); return o.checks.every(c => c.u <= eta + 1e-9); };
+  const kg = 7.85e-6;
+  // warianty kotew uporządkowane wg dolnego oszacowania kosztu
+  const vars = [];
+  KT.SIZES.filter(D => dOf(D) >= 16).forEach(D => {
+    const d = dOf(D), df = KT.hw(d).df, sB = KT.sBmin(bf, d, aw), bp = Math.max(KT.bpMin(sB, d), Math.ceil((bf + 40) / 10) * 10);
+    if (bp > bpMax) return;
+    [1, 2, 3].forEach(nL => {
+      const sL = nL > 1 ? Math.ceil(Math.max(5 * d, 3 * df) / 10) * 10 : U.num(k0.sL, 100);
+      const lpMin = Math.max(100, Math.ceil(((nL - 1) * sL + 2.4 * df) / 10) * 10);
+      if (lpMin > lpMax) return;
+      const hefs = k0.typ === 'wbetonowane' ? [150, 200, 250, 300, 350, 400, 500] : k0.typ === 'rozporowe' ? [U.num(k0.hef, KT.hefDef('rozporowe', d))] : [8, 10, 12, 15, 20].map(m => Math.ceil(m * d / 10) * 10).filter(h => h >= 60);
+      hefs.forEach(hef => {
+        const kk = Object.assign({}, k0, { d: D, nL, hef, sB, sL });
+        const n = 2 * nL, L = KT.length(KT.geom(sec, Object.assign({}, w, { bp, lp: lpMin, tp: 10, kotwy: kk }))).Lr;
+        const cA = 4 * n * kg * Math.PI / 4 * d * d * L + 0.4 * n + 2e-5 * n * hef * d;
+        vars.push({ kk, bp, lpMin, n, cA, lb: cA + kg * bp * lpMin * 10 });
+      });
+    });
+  });
+  vars.sort((a, b) => a.lb - b.lb);
+  const lps = (m) => Array.from(new Set([m, 120, 150, 180, 200, 250, 300, 350, 400, 450, 500].filter(v => v >= m && v <= lpMax)));
+  let best = null, tries = 0;
+  for (const v of vars) {
+    if (best && v.lb >= best.cost) break;
+    // wstępnie: same kotwy przy najcieńszej płycie (najkrótsze ramię przy ścinaniu) – jeśli nie spełniają, wariant odpada
+    const pre = KT.design(ctx, Object.assign({}, w, { bp: v.bp, lp: v.lpMin, tp: 10, lb: v.lpMin, aw, kotwy: v.kk }), F); tries++;
+    if (pre.checks.some(c => /^Kotwy/.test(c.grp) && !(c.u <= eta + 1e-9))) continue;
+    for (const lp of lps(v.lpMin)) {
+      if (best && v.cA + kg * v.bp * lp * 10 >= best.cost) break;
+      let hit = null;
+      for (const tp of [10, 12, 15, 20, 25, 30]) {
+        if (best && v.cA + kg * v.bp * lp * tp >= best.cost) break;
+        const ww = Object.assign({}, w, { bp: v.bp, lp, tp, lb: lp, aw, kotwy: v.kk });
+        if (!okB(ww)) continue;
+        tries++; const o = KT.design(ctx, ww, F);
+        if (okA(o)) { hit = { w: ww, o, cost: v.cA + kg * v.bp * lp * tp }; break; }
+      }
+      if (hit) { if (!best || hit.cost < best.cost) best = hit; break; }
+    }
+  }
+  const res = best ? { ok: true, w: best.w, o: best.o, cost: best.cost, tries } : { ok: false, tries };
+  if (CACHE.size > 60) CACHE.clear();
+  CACHE.set(key, res);
+  return res;
+};
+// opis wariantu dobranego automatycznie
+KT.autoTxt = (w) => `płyta ${U.fmt(U.num(w.bp), 0)}×${U.fmt(U.num(w.lp), 0)}×${U.fmt(U.num(w.tp), 0)} mm, kotwy ${KT.txt(w)}`;
 
 /* ---------------------------------------------------------- dobór kotew (i szerokości płyty) */
 // wariant o najmniejszym „koszcie” n·d²·(h_ef + 50) spełniający wszystkie warunki; typ i klasa – jak wybrane

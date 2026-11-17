@@ -17,7 +17,7 @@ J.defaultState = function () {
     geom: { przesla: [6.0], wspL: 0, wspP: 0 },
     podpory: [
       { typ: 'przegub', ltb: 'widelkowe', ss: 0, c: 0, wezel: { typ: 'blacha_czolowa', hp: 200, bp: 150, tp: 10, nr: 2, d: 'M20', kl: '8.8', e1: 40, p1: 120, e2: 30, p3: 90, a: 5, gatP: 'S235', sup: 'pas_slupa', tsup: 12, supGat: 'S355', gwint: true, otw: 'normalne', Nt: 0 } },
-      { typ: 'przegub', ltb: 'widelkowe', ss: 150, c: 50, wezel: { typ: 'oparcie', podloze: 'beton', bp: 280, lp: 150, tp: 15, beton: 'C25/30', alfa: '', lb: 150, zebro: false, bs: 70, ts: 10, ch: '', bc: 300, lc: 0, hc: 400, ec: 0, aw: 4, Hx: 0, Hy: 0, Nt: 0, kotwy: { on: true, typ: 'wklejane', d: 'M20', kl: '5.8', nL: 1, sB: 210, sL: 100, hef: 160, tauCr: 5, tauUcr: 9, NRkp: '', dh: '', ginst: '', otw: 'normalne', tg: 10, rysy: true, zbrKr: false, zbrGes: false, utw: false } } }
+      { typ: 'przegub', ltb: 'widelkowe', ss: 150, c: 50, wezel: { typ: 'oparcie', podloze: 'beton', bp: 280, lp: 150, tp: 15, beton: 'C25/30', alfa: '', lb: 150, zebro: false, bs: 70, ts: 10, ch: '', bc: 300, lc: 0, hc: 400, ec: 0, aw: 4, Hx: 0, Hy: 0, Nt: 0, kotwy: { on: true, auto: true, stab: true, typ: 'wklejane', d: 'M20', kl: '5.8', nL: 1, sB: 210, sL: 100, hef: 160, tauCr: 5, tauUcr: 9, NRkp: '', dh: '', ginst: '', otw: 'normalne', tg: 10, rysy: true, zbrKr: false, zbrGes: false, utw: false } } }
     ],
     podporyTymczasowe: [],
     przekroj: { typ: 'walc', seria: 'IPE', nr: 300 },
@@ -399,20 +399,41 @@ J.supports = function (st, md, an, combos, sec, base, mat, ndp, env, out) {
         }
       }
     }
+    if (w.typ === 'oparcie' && p.typ === 'utwierdzenie' && Mmax > 1e3) out.warnings.push(`Podpora ${p.id}: utwierdzenie na płycie podporowej – moment M_Ed = ${U.fmt(Mmax / 1e6, 1)} kNm nie jest przenoszony w modelu płyty i kotew (sprawdzono jak oparcie przegubowe); zaprojektuj węzeł momentowy lub zmień typ podpory.`);
+    // dobór automatyczny kotew, rozstawu i płyty podstawy – wymiary efektywne węzła (UI przepisuje je do danych)
+    let wE = w, F2 = null;
+    if (J.hasAnchors(w) && sec.kind !== 'L') {
+      F2 = J.anchorForces(w, p, etapy, env, q, md, sec);
+      if (w.kotwy.auto === true) {
+        const a = KT.autoBase({ sec, mat, ndp }, w, F2, Rmax, 1);
+        if (a.ok) { wE = Object.assign({}, w, { bp: a.w.bp, lp: a.w.lp, tp: a.w.tp, lb: a.w.lb, aw: a.w.aw, kotwy: Object.assign({}, w.kotwy, { d: a.w.kotwy.d, nL: a.w.kotwy.nL, hef: a.w.kotwy.hef, sB: a.w.kotwy.sB, sL: a.w.kotwy.sL }) }); r.auto = { ok: true, txt: KT.autoTxt(wE) }; }
+        else {
+          // podpowiedź: inny rodzaj kotew lub wyższa klasa stali
+          let alt = null, altK = null;
+          for (const [t, kl] of [['wbetonowane', w.kotwy.kl], ['wklejane', w.kotwy.kl], [w.kotwy.typ, '8.8'], ['wbetonowane', '8.8']]) {
+            if (t === w.kotwy.typ && kl === w.kotwy.kl) continue;
+            const a2 = KT.autoBase({ sec, mat, ndp }, Object.assign({}, w, { kotwy: Object.assign({}, w.kotwy, { typ: t, kl, hef: KT.hefDef(t, 20) }) }), F2, Rmax, 1);
+            if (a2.ok) { alt = `${KT.TYPY[t]}, kl. ${kl}: ${KT.autoTxt(a2.w)}`; altK = { typ: t, kl }; break; }
+          }
+          r.auto = { ok: false, alt, altK };
+          out.warnings.push(`Podpora ${p.id}: dobór automatyczny nie znalazł płyty i kotew spełniających warunki (${KT.TYPY[w.kotwy.typ] || ''}, kl. ${w.kotwy.kl}) – sprawdzono wymiary zadane. ${alt ? `Wariant spełniający warunki: ${alt}.` : 'Zwiększ podporę betonową (b_c, h_c) lub klasę betonu.'}`);
+        }
+      }
+    }
+    r.wezelEff = wE;
     if (w.typ === 'oparcie' && w.podloze !== 'stal' && Rmax > 0) {
-      const bp = C.bearingPlate(sec, mat, ndp, { podloze: w.podloze, bp: U.num(w.bp), lp: U.num(w.lp), tp: U.num(w.tp), beton: w.beton, alfa: w.alfa, fd: w.fd, beta: w.beta, lb: U.num(w.lb, U.num(w.lp)), bc: U.num(w.bc, 0), lc: U.num(w.lc, 0), hc: U.num(w.hc, 0), ec: U.num(w.ec, 0) }, Rmax);
+      const bp = C.bearingPlate(sec, mat, ndp, KT.bearArgs(wE), Rmax);
       r.plyta = bp;
       bp.checks.forEach((c, k) => r.checks.push(BS.check({ id: `${p.id}-B${k}`, grp, n: c.n, ref: c.ref, Ed: c.Ed, Rd: c.Rd, unit: 'F', util: c.u, x: p.x, combo: cMax !== null ? combos[cMax].opis : '', d: c, f: c.f })));
       bp.uwagi.forEach(u => out.warnings.push(`Podpora ${p.id}: ${u}`));
     }
     // kotwienie płyty podporowej w betonie (PN-EN 1992-4) i blacha podstawy przy odrywaniu
-    if (J.hasAnchors(w) && sec.kind !== 'L') {
-      const F2 = J.anchorForces(w, p, etapy, env, q);
+    if (F2) {
       try {
-        const ko = KT.design({ sec, mat, ndp }, w, F2);
+        const ko = KT.design({ sec, mat, ndp }, wE, F2);
         r.kotwy = ko; r.kotwyF = F2;
         J.jointChecks(ko, `${p.id}-K`, grp, p.x, F2.opis).forEach(c => r.checks.push(c));
-        if (!(F2.N > 0 || F2.Vx > 0 || F2.Vy > 0)) r.checks.push(BS.check({ id: `${p.id}-K0`, grp, n: `Kotwy płyty podporowej (${KT.txt(w)}) – konstrukcyjne: brak siły odrywającej i poziomej w kombinacjach SGN`, ref: 'PN-EN 1992-4', Ed: null, Rd: null, unit: 'F', util: null, info: true, x: p.x, combo: F2.opis }));
+        if (!(F2.N > 0 || F2.Vx > 0 || F2.Vy > 0)) r.checks.push(BS.check({ id: `${p.id}-K0`, grp, n: `Kotwy płyty podporowej (${KT.txt(wE)}) – konstrukcyjne: brak siły odrywającej i poziomej w kombinacjach SGN`, ref: 'PN-EN 1992-4', Ed: null, Rd: null, unit: 'F', util: null, info: true, x: p.x, combo: F2.opis }));
         ko.uwagi.forEach(u => out.warnings.push(`Podpora ${p.id}: ${u}`));
       } catch (e) { out.errors.push(`Podpora ${p.id} – kotwy: ${e.message}`); }
     }
@@ -432,19 +453,47 @@ J.supports = function (st, md, an, combos, sec, base, mat, ndp, env, out) {
 J.hasAnchors = (w) => !!(w && w.typ === 'oparcie' && w.podloze === 'beton' && w.kotwy && w.kotwy.on !== false);
 // siły na grupę kotew: odrywanie (min. reakcja SGN lub EQU), V_x – siła osiowa belki (podpora nieprzesuwna), V_y – reakcja pozioma
 // w poprzek belki; + siły dodatkowe zadane w węźle (stężenia, temperatura, siły montażowe)
-J.anchorForces = function (w, p, etapy, env, equ) {
-  let RminS = Infinity, Nax = 0, Ry = 0;
-  etapy.forEach(e => { const q = env[e].R[p.id]; if (q) { if (isFinite(q.min)) RminS = Math.min(RminS, q.min); Ry = Math.max(Ry, q.Rymax || 0); } if (isFinite(env[e].Nmax)) Nax = Math.max(Nax, Math.abs(env[e].Nmax), Math.abs(env[e].Nmin)); });
+J.anchorForces = function (w, p, etapy, env, equ, md, sec) {
+  let RminS = Infinity, Nax = 0, Ry = 0, Nf = 0, eNf = null;
+  const ci = (md && md.ciagle) || {}, hs = sec ? (sec.hs || sec.h) : 0, kot = w.kotwy || {};
+  etapy.forEach(e => {
+    const ev = env[e]; if (!ev) return;
+    const q = ev.R[p.id]; if (q) { if (isFinite(q.min)) RminS = Math.min(RminS, q.min); Ry = Math.max(Ry, q.Rymax || 0); }
+    if (isFinite(ev.Nmax)) Nax = Math.max(Nax, Math.abs(ev.Nmax), Math.abs(ev.Nmin));
+    // siła w pasie ściskanym N_f = M/h_s w etapach bez stężenia ciągłego tego pasa (siła stabilizująca – PN-EN 1993-1-1 5.3.3)
+    if (hs > 0 && kot.stab !== false && p.ltb !== 'brak') {
+      const topBr = ci.pasG && e >= U.num(ci.odEtapu, 0), botBr = ci.pasD && e >= U.num(ci.odEtapuD, 0);
+      let Mp = 0, Mn = 0; for (let i = 0; i < ev.Mmax.length; i++) { if (isFinite(ev.Mmax[i])) Mp = Math.max(Mp, ev.Mmax[i]); if (isFinite(ev.Mmin[i])) Mn = Math.max(Mn, -ev.Mmin[i]); }
+      const nf = Math.max(topBr ? 0 : Mp / hs, botBr ? 0 : Mn / hs); if (nf > Nf) { Nf = nf; eNf = e; }
+    }
+  });
+  // reakcja podparcia widełkowego od imperfekcji pasa ściskanego: q_d = N_f·8e₀/L², e₀ = L/500 (α_m = 1, δ_q = 0) → R = q_d·L/2 = N_f/125
+  const Hst = Nf / 125;
   const RminE = (equ || []).length ? Math.min(...equ.map(z => z.Rmin)) : Infinity;
   const Nsgn = Math.max(0, isFinite(RminS) ? -RminS : 0), Nequ = Math.max(0, isFinite(RminE) ? -RminE : 0);
   const Nt = Math.max(0, U.num(w.Nt, 0)) * 1e3, Hx = Math.abs(U.num(w.Hx, 0)) * 1e3, Hy = Math.abs(U.num(w.Hy, 0)) * 1e3;
   const VxN = p.przesuwna ? 0 : Nax;
   const parts = [];
+  if (Hst > 0) parts.push(`V_y,stab = N_f/125 = ${U.fmt(Nf / 1e3, 1)}/125 = ${U.fmt(Hst / 1e3, 2)} kN – siła stabilizująca podparcia widełkowego (PN-EN 1993-1-1 5.3.3; N_f = M_Ed/h_s, etap ${eNf + 1} bez stężenia ciągłego pasa)`);
   if (Nsgn > 0 || Nequ > 0) parts.push(`odrywanie: max(SGN ${U.fmt(Nsgn / 1e3, 1)}; EQU ${U.fmt(Nequ / 1e3, 1)}) kN`);
   if (VxN > 0) parts.push(`V_x = |N_Ed| belki = ${U.fmt(VxN / 1e3, 1)} kN (podpora nieprzesuwna)`);
   if (Ry > 0) parts.push(`V_y = reakcja pozioma ${U.fmt(Ry / 1e3, 1)} kN`);
   if (Nt || Hx || Hy) parts.push(`siły dodatkowe: N_t = ${U.fmt(Nt / 1e3, 1)}, H_x = ${U.fmt(Hx / 1e3, 1)}, H_y = ${U.fmt(Hy / 1e3, 1)} kN`);
-  return { N: Math.max(Nsgn, Nequ) + Nt, Vx: VxN + Hx, Vy: Ry + Hy, Nsgn, Nequ, VxN, Ry, Nt, Hx, Hy, opis: parts.join('; ') || 'brak sił w kombinacjach – kotwy konstrukcyjne' };
+  return { N: Math.max(Nsgn, Nequ) + Nt, Vx: VxN + Hx, Vy: Ry + Hst + Hy, Nsgn, Nequ, VxN, Ry, Hst, Nf, Nt, Hx, Hy, opis: parts.join('; ') || 'brak sił w kombinacjach – kotwy konstrukcyjne' };
+};
+
+// przepisanie wymiarów dobranych automatycznie (płyta, kotwy) do danych projektu; zwraca true, gdy coś się zmieniło
+J.syncAuto = function (st, r) {
+  if (!r || !r.podpory || !r.md) return false;
+  let ch = false;
+  r.podpory.forEach(rp => {
+    if (!rp.auto || !rp.auto.ok || !rp.wezelEff) return;
+    const i = r.md.sup.findIndex(z => z.id === rp.id); const w = i >= 0 && st.podpory[i] && st.podpory[i].wezel; if (!w || !w.kotwy || w.kotwy.auto !== true) return;
+    const e = rp.wezelEff;
+    ['bp', 'lp', 'tp', 'lb', 'aw'].forEach(k => { if (w[k] !== e[k]) { w[k] = e[k]; ch = true; } });
+    ['d', 'nL', 'hef', 'sB', 'sL'].forEach(k => { if (w.kotwy[k] !== e.kotwy[k]) { w.kotwy[k] = e.kotwy[k]; ch = true; } });
+  });
+  return ch;
 };
 
 /* ---------------------------------------------------------- żebra poprzeczne środnika */
@@ -774,7 +823,9 @@ J.dobierzWezly = function (st0, r, eta) {
       else { allOk = false; log.push(`Podpora ${p.id}: nie znaleziono wariantu „${W.TYPY[w.typ]}” spełniającego warunki – zmień rodzaj połączenia lub klasę śrub.`); }
     } else if (sec.kind !== 'L') {
       // oparcie – płyta podporowa i ewentualne żebra
-      if (w.typ === 'oparcie' && w.podloze !== 'stal') {
+      if (w.typ === 'oparcie' && w.podloze !== 'stal' && J.hasAnchors(w) && w.kotwy.auto === true) {
+        if (p.auto && p.auto.ok) log.push(`Podpora ${p.id}: dobór automatyczny – ${p.auto.txt}.`); else { allOk = false; log.push(`Podpora ${p.id}: dobór automatyczny płyty i kotew nie znalazł wariantu – zwiększ podporę betonową lub zmień rodzaj kotew.`); }
+      } else if (w.typ === 'oparcie' && w.podloze !== 'stal') {
         let ok = false;
         for (const lp of [100, 120, 150, 180, 200, 250, 300, 350, 400]) { for (const tp of [10, 12, 15, 20, 25, 30]) {
           const bp = Math.max(U.num(w.bp, 0), Math.ceil((Math.max(sec.bd || sec.b, sec.b) + 40) / 10) * 10);

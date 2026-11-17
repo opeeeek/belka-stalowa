@@ -58,7 +58,8 @@ test('Projekt: odrywanie (EQU) przeniesione kotwami, siła osiowa na podporze ni
   const st = J.defaultState();
   // α automatyczne: A_c1 = 2·A_c0 w kierunku belki (b_c = 300, l_p = 150) → α = 2
   let r = J.run(st);
-  near(r.podpory.find(p => p.id === 'B').plyta.alfa, 2, 1e-12, 'α');
+  const wB = r.podpory.find(p => p.id === 'B').wezelEff;
+  near(r.podpory.find(p => p.id === 'B').plyta.alfa, Math.min(3, (wB.lp + 2 * (150 - wB.lp / 2)) / wB.lp, (wB.lp + 400) / wB.lp, (wB.bp + 400) / wB.bp), 1e-12, 'α');
   // wspornik za podporą B → odrywanie podpory A; podpora A – płyta na betonie z kotwami
   st.geom.wspP = 2.5;
   st.podpory[0].wezel = Object.assign({ typ: 'oparcie' }, BS.W.defaults('oparcie', r.sec));
@@ -79,4 +80,31 @@ test('Projekt: odrywanie (EQU) przeniesione kotwami, siła osiowa na podporze ni
   // dobór kotew
   const d = J.dobierzWezly(st, r, 1), r2 = J.run(d.st), A2 = r2.podpory.find(p => p.id === 'A');
   assert.ok(A2.kotwy.u <= 1 + 1e-9 && A2.kotwy.detalFail.length === 0, d.log.join(' '));
+});
+
+test('Dobór automatyczny płyty i kotew: warunki spełnione, wynik niezależny od poprzednich wymiarów; synchronizacja z danymi', () => {
+  const st = J.defaultState(), w = st.podpory[1].wezel;
+  Object.assign(w, { Nt: 25, Hx: 10 });
+  const r = J.run(st), B = r.podpory.find(p => p.id === 'B');
+  assert.ok(B.auto && B.auto.ok, 'dobrano');
+  assert.ok(B.kotwy.u <= 1 + 1e-9 && B.kotwy.detalFail.length === 0, 'kotwy spełniają warunki');
+  assert.ok(B.plyta.u <= 1 + 1e-9, 'docisk płyty');
+  assert.ok(B.wezelEff.lp <= 300, 'płyta w obrysie podpory b_c = 300');
+  // inne wymiary wyjściowe → ten sam wynik
+  const st2 = JSON.parse(JSON.stringify(st)); Object.assign(st2.podpory[1].wezel, { bp: 600, lp: 300, tp: 40 }); Object.assign(st2.podpory[1].wezel.kotwy, { d: 'M30', nL: 3, hef: 500 });
+  const B2 = J.run(st2).podpory.find(p => p.id === 'B');
+  assert.deepEqual([B2.wezelEff.bp, B2.wezelEff.lp, B2.wezelEff.tp, B2.wezelEff.kotwy.d, B2.wezelEff.kotwy.nL, B2.wezelEff.kotwy.hef], [B.wezelEff.bp, B.wezelEff.lp, B.wezelEff.tp, B.wezelEff.kotwy.d, B.wezelEff.kotwy.nL, B.wezelEff.kotwy.hef]);
+  assert.equal(J.syncAuto(st2, J.run(st2)), true);
+  assert.equal(st2.podpory[1].wezel.bp, B.wezelEff.bp); assert.equal(st2.podpory[1].wezel.kotwy.d, B.wezelEff.kotwy.d);
+  assert.equal(J.syncAuto(st2, J.run(st2)), false, 'stabilne po synchronizacji');
+});
+
+test('Siła stabilizująca podparcia widełkowego V_y = N_f/125 (PN-EN 1993-1-1 5.3.3), pas ściskany bez stężenia ciągłego', () => {
+  const st = J.defaultState();
+  const r = J.run(st), B = r.podpory.find(p => p.id === 'B');
+  // etap 1 (montaż) – pas górny bez stężenia ciągłego; N_f = max M_Ed / h_s
+  const hs = r.sec.hs || r.sec.h, Mp = Math.max(...Array.from(r.env[0].Mmax).filter(isFinite));
+  near(B.kotwyF.Hst, Mp / hs / 125, 1e-9, 'H_stab');
+  st.podpory[1].wezel.kotwy.stab = false;
+  assert.equal(J.run(st).podpory.find(p => p.id === 'B').kotwyF.Hst, 0, 'wyłączona');
 });

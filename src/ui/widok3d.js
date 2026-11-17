@@ -198,7 +198,7 @@ function build(S, R) {
       const xa = bc > 0 ? p.x + s * (-(bc / 2 + ec)) : p.x - lp / 2 - 120, xb = bc > 0 ? p.x + s * (bc / 2 - ec) : p.x + lp / 2 + 120;
       const yh = lc > 0 ? lc / 2 : bp / 2 + 150, hh = hc > 0 ? Math.min(hc, 900) : 320;
       sc.box(Math.min(xa, xb), Math.max(xa, xb), ywc - yh, ywc + yh, zb - hh, zb, w.podloze === 'mur' ? COL.mur : COL.conc, ob, opts.xray ? 0.45 : 1);
-    }
+    } else { const bf2 = 160, hz = 260; sc.box(p.x - bf2 / 2, p.x + bf2 / 2, ywc - 500, ywc + 500, -12, 0, COL.col, ob, 1, 1); sc.box(p.x - 4, p.x + 4, ywc - 500, ywc + 500, -hz + 12, -12, COL.col, ob); sc.box(p.x - bf2 / 2, p.x + bf2 / 2, ywc - 500, ywc + 500, -hz, -hz + 12, COL.col, ob); }
     // kotwy płyty (pręt, podkładka, nakrętka) – część w betonie widoczna przy belce przezroczystej
     if (kg && w.typ === 'oparcie') {
       const kob = sc.o(`Podpora ${p.id} – kotwy ${BS.KT.txt(w)}, L = ${fmt(ko.len.Lr, 0)} mm`, () => A.supportPopup(i, 'anchors'), { kind: 'sup', x: p.x });
@@ -210,7 +210,6 @@ function build(S, R) {
         sc.prism([x, y, H.tw], [x, y, H.tw + H.m], 0.95 * d, 6, COL.bolt, kob, true, Math.PI / 6);
       }));
     }
-    else { const bf2 = 160, hz = 260; sc.box(p.x - bf2 / 2, p.x + bf2 / 2, ywc - 500, ywc + 500, -12, 0, COL.col, ob, 1, 1); sc.box(p.x - 4, p.x + 4, ywc - 500, ywc + 500, -hz + 12, -12, COL.col, ob); sc.box(p.x - bf2 / 2, p.x + bf2 / 2, ywc - 500, ywc + 500, -hz, -hz + 12, COL.col, ob); }
   });
   // podpory montażowe
   md.tmp.forEach(t => { const ob = sc.o(`Podpora montażowa ${t.id} – x = ${fmt(t.x / 1000, 2)} m, usuwana po etapie ${t.do + 1}`, () => A.stagesPopup(), { kind: 'tmp', x: t.x }); sc.box(t.x - 50, t.x + 50, ywc - 50, ywc + 50, -900, 0, COL.tmp, ob, 0.75); });
